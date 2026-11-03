@@ -729,9 +729,17 @@ footer .mini{font-size:11.5px;padding:6px 12px}
   }
 
   /* ---------- 网络 ---------- */
+  // 页面是不是跑在「本机」：双击打开（file:）或 localhost / 127.0.0.1
+  function isLocalPage() {
+    if (location.protocol === 'file:') return true;
+    return /^(localhost|127\.0\.0\.1|\[::1\])$/i.test(location.hostname);
+  }
+
+  // 手机上打开 GitHub Pages 时，127.0.0.1 指的是手机自己，永远连不上，
+  // 所以只在本地打开时才加这个备选地址，免得每次启动白等 1.5 秒。
   var API_CANDIDATES = location.protocol === 'file:'
     ? ['http://127.0.0.1:8788']
-    : ['', 'http://127.0.0.1:8788'];
+    : (isLocalPage() ? ['', 'http://127.0.0.1:8788'] : ['']);
 
   function probe(base) {
     return new Promise(function (resolve, reject) {
@@ -2593,7 +2601,9 @@ footer .mini{font-size:11.5px;padding:6px 12px}
       ? '数据存在你 GitHub 账号下的私密 Gist 里，手机和电脑各自打开都会自动同步，电脑关机也不影响。点右上角「☁️ 云端」可以换 Token 或断开。'
       : (online
         ? '数据保存在本文件夹的 data.json 里，每天自动备份到「备份」文件夹。想在没有电脑时也能打卡，点右上角「☁️ 云端」配置一次性同步。'
-        : '离线模式：先双击同一个文件夹里的「启动打卡.bat」，等它弹出黑窗口后刷新本页。或者点「☁️ 云端」，让数据存到 GitHub，电脑不用开机也能用。');
+        : (isLocalPage()
+          ? '离线模式：先双击同一个文件夹里的「启动打卡.bat」，等它弹出黑窗口后刷新本页。或者点「☁️ 云端」，让数据存到 GitHub，电脑不用开机也能用。'
+          : '现在数据只存在这台设备的浏览器里。点右上角「☁️ 云端」连一次 GitHub，之后手机和电脑会自动互相同步，电脑关机也能用。'));
   }
 
   function boot() {
@@ -2613,7 +2623,9 @@ footer .mini{font-size:11.5px;padding:6px 12px}
       .catch(function () {
         online = false;
         db = loadLocal();
-        setStatus('离线模式 · 未连上本地服务，数据暂存在浏览器', false);
+        setStatus(isLocalPage()
+          ? '离线模式 · 未连上本地服务，数据暂存在浏览器'
+          : '未配置云端 · 数据只存在这台设备上', false);
         start();
         watchReconnect();
       });
@@ -2623,6 +2635,8 @@ footer .mini{font-size:11.5px;padding:6px 12px}
   function watchReconnect() {
     if (cloudOn()) return;
     if (reconnector) return;
+    // 跑在 GitHub Pages 上时没有本地服务可等，别每 5 秒白试一次
+    if (!isLocalPage()) return;
     reconnector = setInterval(function () {
       resolveBase().then(function () {
         clearInterval(reconnector); reconnector = null;
