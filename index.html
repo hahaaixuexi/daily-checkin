@@ -265,6 +265,33 @@ h2{margin:0;font-size:16px;font-weight:680;letter-spacing:-.012em;transition:col
   cursor:pointer;font-size:16px;line-height:1;font-family:inherit;transition:.16s}
 .book .bx:hover{background:var(--chip);color:#e0576f}
 .mini-stats{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+
+/* ---------- 电影 ---------- */
+.movie{padding:13px 14px;background:var(--card);border:1px solid var(--line);
+  border-radius:15px;box-shadow:var(--shadow);transition:.18s ease}
+.movie:hover{transform:translateY(-1px);box-shadow:var(--shadow-hover)}
+.movie .mhead{display:flex;align-items:center;gap:8px}
+.movie .mhead b{flex:1;min-width:0;font-size:14.5px;font-weight:680;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.movie .mmeta{margin-top:4px;font-size:11.5px;color:var(--muted);line-height:1.5}
+.movie .mfoot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:9px}
+.movie .stars{display:flex;gap:1px}
+.movie .stars button{width:20px;height:22px;padding:0;border:0;background:transparent;color:#d9cfbe;
+  font-size:15px;line-height:1;cursor:pointer;transition:.14s;font-family:inherit}
+.movie .stars button.on{color:#f0a83c}
+.movie .stars button:hover{transform:scale(1.16)}
+.movie .ms{font-family:inherit;font-size:11.5px;font-weight:650;padding:6px 11px;border-radius:99px;
+  border:1px solid var(--line);background:var(--card-2);color:var(--muted);cursor:pointer;transition:.16s;white-space:nowrap}
+.movie .ms.watched{color:#3fa46a;border-color:#bce0cb;background:#eefaf2}
+.movie .ms.want{color:#b8860b;border-color:#e6d3a3;background:#fdf6e3}
+.movie .mx{flex:none;width:26px;height:26px;border:0;border-radius:50%;background:transparent;color:var(--muted);
+  cursor:pointer;font-size:16px;line-height:1;font-family:inherit;transition:.16s}
+.movie .mx:hover{background:var(--chip);color:#e0576f}
+@media (prefers-color-scheme: dark){
+  .movie .stars button{color:#4a4335}
+  .movie .stars button.on{color:#f0b954}
+  .movie .ms.watched{color:#6ecf95;border-color:#234a33;background:#152a1e}
+  .movie .ms.want{color:#e0bd63;border-color:#5a4a22;background:#2c2517}
+}
 .mini-stats b{color:var(--ink);font-weight:700}
 
 /* ---------- 日历 ---------- */
@@ -481,6 +508,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     <button class="nav-item" data-view="sport" role="tab" aria-selected="false"><span class="ni">💪</span>运动</button>
     <button class="nav-item" data-view="books" role="tab" aria-selected="false"><span class="ni">📚</span>读书</button>
     <button class="nav-item" data-view="life" role="tab" aria-selected="false"><span class="ni">🌿</span>生活</button>
+    <button class="nav-item" data-view="movies" role="tab" aria-selected="false"><span class="ni">🎬</span>电影</button>
     <button class="nav-item" data-view="history" role="tab" aria-selected="false"><span class="ni">📅</span>记录</button>
   </nav>
 
@@ -590,6 +618,21 @@ footer .mini{font-size:11.5px;padding:6px 12px}
   </section>
 
   <!-- ============ 记录 ============ -->
+  <section class="view" id="viewMovies" hidden>
+    <div class="stats">
+      <div class="stat"><b id="mvTotal">0</b><span>片单</span></div>
+      <div class="stat"><b id="mvWatched">0</b><span>看过</span></div>
+      <div class="stat"><b id="mvWant">0</b><span>想看</span></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><b>🎬 我的片单</b><span class="hint" id="mvAvg">还没有评分</span></div>
+      <div class="mini-stats" id="mvStat"></div>
+    </div>
+    <div class="sec-title"><span>电影 · <span id="mvTotalHint">0 部</span></span>
+      <button class="mini" type="button" id="addMovieBtn">＋ 添加</button></div>
+    <div class="row-list" id="movieList"></div>
+  </section>
+
   <section class="view" id="viewHistory" hidden>
     <div class="stats" style="grid-template-columns:repeat(4,1fr)">
       <div class="stat"><b id="hTotal">0 天</b><span>打卡天数</span></div>
@@ -704,6 +747,10 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     if (typeof o.sport.goal.squat !== 'number') o.sport.goal.squat = 50;
     if (!Array.isArray(o.books)) o.books = [];
     if (!Array.isArray(o.readLog)) o.readLog = [];
+    if (!Array.isArray(o.movies)) o.movies = [];
+    // 删除标记：'books:bxxx' / 'movies:mxxx' → 删除时间。
+    // 没有它的话，云端「先读远端再合并」会把刚删掉的条目又并回来。
+    if (!o.tomb || typeof o.tomb !== 'object') o.tomb = {};
     if (!o.life || typeof o.life !== 'object') o.life = {};
     if (!Array.isArray(o.life.shower)) o.life.shower = [];
     if (!Array.isArray(o.life.hair)) o.life.hair = [];
@@ -806,6 +853,8 @@ footer .mini{font-size:11.5px;padding:6px 12px}
       // 每个字段都提交完整内容：这样删除一本书 / 删一条记录才能真正生效。
       // 服务器只更新 patch 里出现的字段，其余字段原样保留。
       parts.forEach(function (p) { if (db[p] !== undefined) patch[p] = db[p]; });
+      // 删除标记跟着一起提交，否则本地服务端也会把删掉的并回来
+      if (db.tomb && Object.keys(db.tomb).length) patch.tomb = db.tomb;
       pendingPart = {};
       jobs.push(api('/api/db', {
         method: 'POST',
@@ -1197,7 +1246,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
   }
 
   function renderBooks() {
-    var books = db.books || [];
+    var books = dropBuried((db.books || []).slice(), 'books');
     var want = 0, reading = 0, done = 0;
     books.forEach(function (b) {
       if (b.status === 'done') done++;
@@ -1244,6 +1293,159 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     renderBooks();
     toast('《' + (b.title || '') + '》→ ' + (b.status === 'done' ? '已读' : (b.status === 'reading' ? '在读' : '想读')));
     if (b.status === 'done') burst(14);
+  }
+
+  /* ================= 删除标记 ================= */
+  // 删书 / 删电影时留个墓碑，这样云端合并时不会把删掉的又补回来。
+  function bury(kind, id) {
+    if (!db.tomb || typeof db.tomb !== 'object') db.tomb = {};
+    db.tomb[kind + ':' + id] = Date.now();
+  }
+  function dropBuried(list, kind) {
+    if (!Array.isArray(list)) return list;
+    var tomb = db.tomb || {};
+    for (var i = list.length - 1; i >= 0; i--) {
+      var x = list[i];
+      var id = (x && typeof x === 'object') ? x.id : x;
+      if (tomb[kind + ':' + id]) list.splice(i, 1);
+    }
+    return list;
+  }
+
+  /* ================= 电影 ================= */
+  function mvArr() {
+    if (!Array.isArray(db.movies)) db.movies = [];
+    return db.movies;
+  }
+  function mvById(id) {
+    var hit = null;
+    mvArr().forEach(function (x) { if (String(x.id) === String(id)) hit = x; });
+    return hit;
+  }
+  function mvLabel(m) {
+    var parts = [];
+    if (m.year) parts.push(String(m.year));
+    if (m.genre) parts.push(m.genre);
+    if (m.status === 'watched') parts.push('\u770b\u8fc7' + (m.date ? ' ' + m.date : ''));
+    else parts.push('\u60f3\u770b');
+    if (m.note) parts.push(m.note);
+    return parts.join(' \u00b7 ');
+  }
+  function renderMovies() {
+    var list = dropBuried(mvArr().slice(), 'movies');
+    var watched = 0, want = 0, rated = 0, sum = 0;
+    list.forEach(function (m) {
+      if (m.status === 'watched') watched++; else want++;
+      var r = Number(m.rating) || 0;
+      if (r > 0) { rated++; sum += r; }
+    });
+    $('#mvTotal').textContent = list.length;
+    $('#mvWatched').textContent = watched;
+    $('#mvWant').textContent = want;
+    $('#mvTotalHint').textContent = list.length + ' \u90e8';
+    $('#mvAvg').textContent = rated ? '\u5e73\u5747 ' + (sum / rated).toFixed(1) + ' \u661f' : '\u8fd8\u6ca1\u6709\u8bc4\u5206';
+    $('#mvStat').innerHTML = list.length
+      ? '<span>\u8bc4\u8fc7\u5206 <b>' + rated + '</b> \u90e8</span><span>\u672c\u6708\u770b\u4e86 <b>' +
+        list.filter(function (m) { return m.date && m.date.slice(0, 7) === TODAY.slice(0, 7); }).length + '</b> \u90e8</span>'
+      : '';
+    if (!list.length) {
+      $('#movieList').innerHTML = '<div class="empty">\u7247\u5355\u8fd8\u662f\u7a7a\u7684<br>\u70b9\u4e0a\u9762\u300c\uff0b \u6dfb\u52a0\u300d\u8bb0\u4e00\u90e8</div>';
+      return;
+    }
+    var order = { want: 0, watched: 1 };
+    var sorted = list.slice().sort(function (a, b) {
+      var d = (order[a.status] || 0) - (order[b.status] || 0);
+      if (d) return d;
+      var ad = a.date || '', bd = b.date || '';
+      if (ad === bd) return 0;
+      return ad < bd ? 1 : -1;
+    });
+    $('#movieList').innerHTML = sorted.map(function (m) {
+      var r = Number(m.rating) || 0;
+      var stars = '';
+      for (var i = 1; i <= 5; i++) {
+        stars += '<button type="button" class="' + (i <= r ? 'on' : '') + '" data-rate="' + i +
+          '" aria-label="' + i + ' \u661f">\u2605</button>';
+      }
+      var on = m.status === 'watched';
+      return '<div class="movie" data-movie="' + esc(m.id) + '">' +
+        '<div class="mhead"><b>' + esc(m.title || '\u672a\u547d\u540d') + '</b>' +
+          '<button class="mx" type="button" data-mdel="' + esc(m.id) + '" aria-label="\u5220\u9664">\u00d7</button></div>' +
+        '<div class="mmeta">' + esc(mvLabel(m)) + '</div>' +
+        '<div class="mfoot"><div class="stars">' + stars + '</div>' +
+          '<button class="ms ' + (on ? 'watched' : 'want') + '" type="button" data-mtoggle="' + esc(m.id) + '">' +
+          (on ? '\u5df2\u770b' : '\u60f3\u770b') + '</button>' +
+        '</div></div>';
+    }).join('');
+  }
+
+  function rateMovie(id, stars) {
+    var m = mvById(id);
+    if (!m) return;
+    m.rating = (Number(m.rating) || 0) === stars ? 0 : stars;
+    if (m.rating && m.status !== 'watched') {
+      m.status = 'watched';
+      if (!m.date) m.date = TODAY;
+    }
+    scheduleSave('movies');
+    renderMovies();
+  }
+
+  function toggleMovie(id) {
+    var m = mvById(id);
+    if (!m) return;
+    if (m.status === 'watched') {
+      m.status = 'want';
+      m.date = '';
+    } else {
+      m.status = 'watched';
+      m.date = TODAY;
+      burst(14);
+    }
+    scheduleSave('movies');
+    renderMovies();
+    toast('\u300a' + (m.title || '') + '\u300b\u2192 ' + (m.status === 'watched' ? '\u5df2\u770b' : '\u60f3\u770b'));
+  }
+
+  function delMovie(id) {
+    var m = mvById(id);
+    if (!m) return;
+    if (!confirm('\u628a\u300a' + m.title + '\u300b\u4ece\u7247\u5355\u79fb\u9664\uff1f')) return;
+    bury('movies', id);
+    db.movies = mvArr().filter(function (x) { return String(x.id) !== String(id); });
+    scheduleSave('movies');
+    renderMovies();
+    toast('\u5df2\u79fb\u9664');
+  }
+
+  function modalMovie() {
+    openModal('\u6dfb\u52a0\u4e00\u90e8\u7535\u5f71',
+      '<label class="field"><span>\u7247\u540d</span><input id="mMvTitle" type="text" placeholder="\u4f8b\u5982\uff1a\u98de\u9a70\u4eba\u751f3"></label>' +
+      '<label class="field"><span>\u5e74\u4efd\uff08\u53ef\u4e0d\u586b\uff09</span><input id="mMvYear" type="text" inputmode="numeric" placeholder="2026"></label>' +
+      '<label class="field"><span>\u7c7b\u578b\uff08\u53ef\u4e0d\u586b\uff09</span><input id="mMvGenre" type="text" placeholder="\u559c\u5267 / \u5267\u60c5 / \u79d1\u5e7b"></label>' +
+      '<label class="field"><span>\u72b6\u6001</span><select id="mMvStatus">' +
+        '<option value="want">\u60f3\u770b</option><option value="watched">\u770b\u8fc7</option></select></label>' +
+      '<button class="btn" id="mMvOk">\u52a0\u5230\u7247\u5355</button>');
+    $('#mMvOk').addEventListener('click', function () {
+      var t = ($('#mMvTitle').value || '').trim();
+      if (!t) { toast('\u7247\u540d\u4e0d\u80fd\u4e3a\u7a7a'); return; }
+      var st = $('#mMvStatus').value;
+      mvArr().push({
+        id: 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        title: t,
+        year: ($('#mMvYear').value || '').trim(),
+        genre: ($('#mMvGenre').value || '').trim(),
+        status: st,
+        date: st === 'watched' ? TODAY : '',
+        rating: 0,
+        note: ''
+      });
+      scheduleSave('movies');
+      closeModal();
+      renderMovies();
+      toast('\u5df2\u52a0\u5165\u7247\u5355\uff1a\u300a' + t + '\u300b');
+    });
+    setTimeout(function () { var i = $('#mMvTitle'); if (i) i.focus(); }, 340);
   }
 
   /* ================= 生活 ================= */
@@ -1691,10 +1893,12 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     if (view === 'history') { fab.hidden = true; return; }
     fab.hidden = false;
     fab.classList.toggle('hint', view === 'today');
-    fab.textContent = view === 'today' ? '💧' : (view === 'sport' ? '＋' : (view === 'books' ? '📖' : '✓'));
+    fab.textContent = view === 'today' ? '💧' : (view === 'sport' ? '＋' :
+      (view === 'books' ? '📖' : (view === 'movies' ? '🎬' : '✓')));
     fab.setAttribute('aria-label',
       view === 'today' ? '多喝一杯水' :
-      view === 'sport' ? '记一组运动' : view === 'books' ? '记录阅读' : '生活打卡');
+      view === 'sport' ? '记一组运动' : view === 'books' ? '记录阅读' :
+      (view === 'movies' ? '记一部电影' : '生活打卡'));
   }
 
   fab.addEventListener('click', function () {
@@ -1710,6 +1914,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     }
     if (currentView === 'sport') { modalSport(); return; }
     if (currentView === 'books') { modalRead(); return; }
+    if (currentView === 'movies') { modalMovie(); return; }
     if (currentView === 'life') {
       if (lifeView === 'shower' || lifeView === 'hair') {
         toggleLifeDay(lifeView, TODAY);
@@ -1728,7 +1933,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
 
   function switchView(name) {
     currentView = name;
-    ['today', 'sport', 'books', 'life', 'history'].forEach(function (v) {
+    ['today', 'sport', 'books', 'movies', 'life', 'history'].forEach(function (v) {
       var el = $('#view' + v.charAt(0).toUpperCase() + v.slice(1));
       if (el) el.hidden = (v !== name);
     });
@@ -1739,6 +1944,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     });
     if (name === 'sport') renderSport();
     if (name === 'books') renderBooks();
+    if (name === 'movies') renderMovies();
     if (name === 'life') renderLife();
     if (name === 'history') renderHistory();
     updateFab();
@@ -1825,6 +2031,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
       var b = db.books.filter(function (x) { return x.id === id; })[0];
       if (!b) return;
       if (!confirm('把《' + b.title + '》从书架移除？')) return;
+      bury('books', id);
       db.books = db.books.filter(function (x) { return x.id !== id; });
       scheduleSave('books');
       renderBooks();
@@ -1835,6 +2042,21 @@ footer .mini{font-size:11.5px;padding:6px 12px}
   function addBook() { modalBook(); }
 
   $('#addBookBtn').addEventListener('click', addBook);
+
+  /* ---- 电影 ---- */
+  $('#addMovieBtn').addEventListener('click', modalMovie);
+  $('#movieList').addEventListener('click', function (e) {
+    var rt = e.target.closest('[data-rate]');
+    if (rt) {
+      var box = rt.closest('.movie');
+      if (box) rateMovie(box.dataset.movie, Number(rt.dataset.rate));
+      return;
+    }
+    var tg = e.target.closest('[data-mtoggle]');
+    if (tg) { toggleMovie(tg.dataset.mtoggle); return; }
+    var dl = e.target.closest('[data-mdel]');
+    if (dl) delMovie(dl.dataset.mdel);
+  });
 
   /* ---- 生活 ---- */
   $('#lifeSeg').addEventListener('click', function (e) {
@@ -2268,6 +2490,11 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     target = normalize(target);
     extra = normalize(extra);
 
+    // 0) 删除标记：两边谁删过都算删（墓碑越多只会多删，不会把删掉的救回来）
+    Object.keys(extra.tomb || {}).forEach(function (k) {
+      if (!target.tomb[k]) target.tomb[k] = extra.tomb[k];
+    });
+
     // 1) 打卡日期：target 没有的补回来
     Object.keys(extra.days || {}).forEach(function (k) {
       if (!target.days[k]) { target.days[k] = extra.days[k]; added++; }
@@ -2306,6 +2533,23 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     ['hand', 'foot'].forEach(function (k) {
       added += unionInto(target.life.nails[k], extra.life.nails[k], function (x) { return String(x); });
     });
+
+    // 5.5) 电影：按 id 合并，保留本机已有的评分
+    added += unionInto(target.movies, extra.movies, function (m) { return m && (m.id || m.title); });
+
+    // 6) 其它顶层字段（legacyMyLife 这类旧版存档）：本机没有就从云端补回来，
+    //    否则推一次云端就把它们抹掉了。
+    Object.keys(extra).forEach(function (k) {
+      if (k === 'version' || k === 'updated') return;
+      if (target[k] === undefined && extra[k] !== undefined) {
+        target[k] = extra[k];
+        added++;
+      }
+    });
+
+    // 7) 最后按墓碑把删掉的书 / 电影清掉
+    dropBuried(target.books, 'books');
+    dropBuried(target.movies, 'movies');
 
     return added;
   }
@@ -2578,6 +2822,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     renderToday();
     if (currentView === 'sport') renderSport();
     if (currentView === 'books') renderBooks();
+    if (currentView === 'movies') renderMovies();
     if (currentView === 'life') renderLife();
     if (currentView === 'history') renderHistory();
   }
