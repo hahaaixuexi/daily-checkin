@@ -314,6 +314,7 @@ h2{margin:0;font-size:16px;font-weight:680;letter-spacing:-.012em;transition:col
   .bb-overdue{background:#2e1a1f;color:#f08b9f}
 }
 .life-row{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px dashed var(--line)}
+#viewLife .panel{--c:var(--c-life)}
 .life-row:last-child{border-bottom:0}
 .life-row .lr-t{flex:1;min-width:0}
 .life-row .lr-t b{display:block;font-size:13.5px;font-weight:650}
@@ -430,6 +431,9 @@ footer .mini{font-size:11.5px;padding:6px 12px}
   .vid{width:26px;height:26px;font-size:11px}
   .cup{width:22px;height:22px}
   .modal{padding:14px 15px calc(18px + env(safe-area-inset-bottom))}
+  .life-row{flex-wrap:wrap;gap:8px 9px;padding:12px 0}
+  .life-row .lr-t{flex:1 1 100%}
+  .life-row .bb{margin-left:auto}
   .qr-box svg{width:min(68vw,220px)}
   .toast{font-size:12.5px;max-width:92vw}
 }
@@ -554,6 +558,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
       <button class="seg-btn" data-life="hair">💇 洗头</button>
       <button class="seg-btn" data-life="haircut">✂️ 理发</button>
       <button class="seg-btn" data-life="bedding">🛏️ 被褥</button>
+      <button class="seg-btn" data-life="nails">💅 指甲</button>
     </div>
     <div class="panel" id="lifeShower">
       <div class="panel-head"><b>洗澡记录</b><span class="hint" id="showerHint">—</span></div>
@@ -575,6 +580,12 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     <div class="panel" id="lifeBedding" hidden>
       <div class="panel-head"><b>🛏️ 被褥</b><span class="hint" id="bedSeason">—</span></div>
       <div id="bedList"></div>
+    </div>
+    <div class="panel" id="lifeNails" hidden>
+      <div class="panel-head"><b>💅 指甲</b><span class="hint" id="nailHint">点一下记下今天，再点取消</span></div>
+      <div id="nailList"></div>
+      <div class="sec-title" style="margin-top:16px"><span>最近记录</span></div>
+      <div id="nailHistory" class="row-list"></div>
     </div>
   </section>
 
@@ -700,6 +711,9 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     if (!o.life.bedding || typeof o.life.bedding !== 'object') o.life.bedding = {};
     if (!Array.isArray(o.life.bedding.sun)) o.life.bedding.sun = [];
     if (!Array.isArray(o.life.bedding.wash)) o.life.bedding.wash = [];
+    if (!o.life.nails || typeof o.life.nails !== 'object') o.life.nails = {};
+    if (!Array.isArray(o.life.nails.hand)) o.life.nails.hand = [];
+    if (!Array.isArray(o.life.nails.foot)) o.life.nails.foot = [];
     o.version = 2;
     return o;
   }
@@ -1344,6 +1358,63 @@ footer .mini{font-size:11.5px;padding:6px 12px}
       '</div>';
   }
 
+  /* ---------- 指甲 ---------- */
+  var NAIL_TYPES = [
+    { id: 'hand', icon: '🖐', title: '剪指甲', interval: 14, tip: '手指甲两周左右修一次' },
+    { id: 'foot', icon: '🦶', title: '剪脚趾甲', interval: 30, tip: '脚趾甲长得慢，一个月左右' }
+  ];
+
+  function nailArr(id) {
+    if (!db.life.nails || typeof db.life.nails !== 'object') db.life.nails = {};
+    if (!Array.isArray(db.life.nails[id])) db.life.nails[id] = [];
+    return db.life.nails[id];
+  }
+
+  function addNail(id) {
+    var arr = nailArr(id);
+    var t = NAIL_TYPES.filter(function (x) { return x.id === id; })[0] || NAIL_TYPES[0];
+    var i = arr.indexOf(TODAY);
+    if (i >= 0) { arr.splice(i, 1); toast('已取消今天的' + t.title); }
+    else { arr.push(TODAY); toast(t.icon + ' 已记下今天' + t.title); }
+    scheduleSave('life');
+    renderNails();
+  }
+
+  function renderNails() {
+    $('#nailList').innerHTML = NAIL_TYPES.map(function (t) {
+      var arr = nailArr(t.id);
+      var s = bedStatus(lifeLast(arr), t.interval);
+      var on = arr.indexOf(TODAY) >= 0;
+      return '<div class="life-row">' +
+        '<div class="lr-t"><b>' + t.icon + ' ' + t.title + '</b><span>' + t.tip +
+          (s.due ? ' · 建议 ' + s.due : '') + ' · 累计 ' + arr.length + ' 次</span></div>' +
+        '<span class="bb ' + s.cls + '">' + s.text + '</span>' +
+        '<button class="mini' + (on ? ' primary' : '') + '" data-nail="' + t.id + '">' +
+          (on ? '已剪' : '今天剪') + '</button>' +
+      '</div>';
+    }).join('');
+
+    var all = [];
+    NAIL_TYPES.forEach(function (t) {
+      nailArr(t.id).forEach(function (d) { all.push({ d: d, t: t }); });
+    });
+    all.sort(function (a, b) { return a.d < b.d ? 1 : -1; });
+    if (!all.length) {
+      $('#nailHistory').innerHTML = '<div class="empty">还没有记录<br>点上面的按钮记下第一次</div>';
+      return;
+    }
+    $('#nailHistory').innerHTML = all.slice(0, 10).map(function (x) {
+      var dt = parseKey(x.d);
+      var n = daysBetween(x.d, TODAY);
+      return '<div class="task-row">' +
+        '<span class="ti">' + x.t.icon + '</span>' +
+        '<span class="tn">' + x.t.title + '</span>' +
+        '<span class="tv">' + dt.getFullYear() + '-' + pad(dt.getMonth() + 1) + '-' + pad(dt.getDate()) +
+          ' · ' + (n === 0 ? '今天' : n + ' 天前') + '</span>' +
+      '</div>';
+    }).join('');
+  }
+
   function renderHaircut() {
     var list = (db.life.haircut || []).slice().sort(function (a, b) { return a.d < b.d ? 1 : -1; });
     var last = list[0];
@@ -1385,13 +1456,14 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     document.querySelectorAll('#lifeSeg .seg-btn').forEach(function (b) {
       b.classList.toggle('active', b.dataset.life === lifeView);
     });
-    ['shower', 'hair', 'haircut', 'bedding'].forEach(function (k) {
+    ['shower', 'hair', 'haircut', 'bedding', 'nails'].forEach(function (k) {
       var el = $('#life' + k.charAt(0).toUpperCase() + k.slice(1));
       if (el) el.hidden = (k !== lifeView);
     });
     if (lifeView === 'shower' || lifeView === 'hair') renderLifeCalendar(lifeView);
     if (lifeView === 'haircut') renderHaircut();
     if (lifeView === 'bedding') renderBedding();
+    if (lifeView === 'nails') renderNails();
   }
 
   /* ================= 记录 ================= */
@@ -1635,6 +1707,8 @@ footer .mini{font-size:11.5px;padding:6px 12px}
         toggleLifeDay(lifeView, TODAY);
       } else if (lifeView === 'haircut') {
         addHaircut();
+      } else if (lifeView === 'nails') {
+        addNail('hand');
       } else {
         addBedding('sun');
       }
@@ -1807,6 +1881,8 @@ footer .mini{font-size:11.5px;padding:6px 12px}
   document.addEventListener('click', function (e) {
     var b = e.target.closest('[data-bed]');
     if (b) addBedding(b.dataset.bed);
+    var n = e.target.closest('[data-nail]');
+    if (n) addNail(n.dataset.nail);
   });
 
   /* ---- 记录 ---- */
@@ -2129,6 +2205,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
   }
 
   // 把整份 db 推到云端：1.2 秒防抖，连续点击只推最后一次
+  // 推之前先读一次远端做合并（读-改-写），否则另一台设备刚记的东西会被整份覆盖掉
   function cloudPush(now) {
     if (!cloudOn()) return;
     clearTimeout(cloudPushTimer);
@@ -2136,7 +2213,16 @@ footer .mini{font-size:11.5px;padding:6px 12px}
       cloudPushTimer = null;
       if (cloudBusy) { cloudPushTimer = setTimeout(fire, 900); return; }
       cloudBusy = true;
-      gistWrite(JSON.stringify(db)).then(function () {
+      gistRead().then(function (r) {
+        if (r && r.text) {
+          try {
+            var remote = normalize(JSON.parse(r.text));
+            var n = mergeDb(db, remote);
+            if (n) { saveLocal(); renderAll(); }
+          } catch (e) { /* 远端坏了就按本机写，别卡住保存 */ }
+        }
+        return gistWrite(JSON.stringify(db));
+      }).then(function () {
         cloudBusy = false;
         dirty = false;
         setStatus('已保存到云端 ☁️', true);
@@ -2155,13 +2241,72 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     return pad(d.getHours()) + ':' + pad(d.getMinutes());
   }
 
-  // 云端数据拉下来后，把本机独有的日期补回去，避免换设备丢历史
-  function mergeLocalIntoDb() {
-    var local = loadLocal();
-    var keys = Object.keys(local.days || {});
+  // 云端数据拉下来后，把本机独有的内容补回去，避免换设备丢历史
+  // 注意：不能只合并 days —— 运动/书架/阅读/生活（含指甲）都是独立字段，
+  // 只合并 days 会让本机独有的记录在拉取后被云端覆盖掉。
+  function unionInto(target, extra, keyFn) {
+    var seen = {}, n = 0;
+    target.forEach(function (x) { seen[keyFn(x)] = true; });
+    (extra || []).forEach(function (x) {
+      var k = keyFn(x);
+      if (!seen[k]) { target.push(x); seen[k] = true; n++; }
+    });
+    return n;
+  }
+
+  // 把 extra 里 target 没有的内容并进来（target 已有的保持不动）
+  function mergeDb(target, extra) {
     var added = 0;
-    keys.forEach(function (k) { if (!db.days[k]) { db.days[k] = local.days[k]; added++; } });
+    target = normalize(target);
+    extra = normalize(extra);
+
+    // 1) 打卡日期：target 没有的补回来
+    Object.keys(extra.days || {}).forEach(function (k) {
+      if (!target.days[k]) { target.days[k] = extra.days[k]; added++; }
+    });
+
+    // 2) 运动：按日期合并（日期已存在就用 target 的）
+    ['pushup', 'squat'].forEach(function (t) {
+      added += unionInto(target.sport[t], extra.sport[t], function (e) { return e && e.d; });
+      target.sport[t].sort(function (a, b) { return (a.d || '') < (b.d || '') ? -1 : 1; });
+    });
+    ['pushup', 'squat'].forEach(function (t) {
+      if (extra.sport.goal[t] != null) target.sport.goal[t] = target.sport.goal[t] || extra.sport.goal[t];
+    });
+
+    // 3) 书架：按 id（老数据没 id 就用书名+作者）
+    added += unionInto(target.books, extra.books, function (b) {
+      return b && (b.id || (b.title || '') + '|' + (b.author || ''));
+    });
+
+    // 4) 阅读记录：按 日期+分钟+书 id
+    added += unionInto(target.readLog, extra.readLog, function (r) {
+      return r && (r.d + '|' + r.min + '|' + (r.bookId || ''));
+    });
+    target.readLog.sort(function (a, b) { return (a.d || '') < (b.d || '') ? -1 : 1; });
+
+    // 5) 生活：洗澡/洗头/理发/被褥/指甲
+    ['shower', 'hair'].forEach(function (k) {
+      added += unionInto(target.life[k], extra.life[k], function (x) { return String(x); });
+    });
+    added += unionInto(target.life.haircut, extra.life.haircut, function (x) {
+      return x && (x.id || x.date);
+    });
+    ['sun', 'wash'].forEach(function (k) {
+      added += unionInto(target.life.bedding[k], extra.life.bedding[k], function (x) { return String(x); });
+    });
+    ['hand', 'foot'].forEach(function (k) {
+      added += unionInto(target.life.nails[k], extra.life.nails[k], function (x) { return String(x); });
+    });
+
     return added;
+  }
+
+  // 云端数据拉下来后，把本机独有的内容补回去，避免换设备丢历史
+  // 注意：不能只合并 days —— 运动/书架/阅读/生活（含指甲）都是独立字段，
+  // 只合并 days 会让本机独有的记录在拉取后被云端覆盖掉。
+  function mergeLocalIntoDb() {
+    return mergeDb(db, loadLocal());
   }
 
   function cloudPull(why) {
