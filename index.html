@@ -643,18 +643,18 @@ footer .mini{font-size:11.5px;padding:6px 12px}
   <!-- ============ 记录 ============ -->
   <section class="view" id="viewMovies" hidden>
     <div class="stats">
-      <div class="stat"><b id="mvTotal">0</b><span>片单</span></div>
-      <div class="stat"><b id="mvCinema">0</b><span>影院</span></div>
-      <div class="stat"><b id="mvHome">0</b><span>日常</span></div>
+      <div class="stat"><b id="mvWatching">0</b><span>在看</span></div>
+      <div class="stat"><b id="mvWant">0</b><span>准备看</span></div>
+      <div class="stat"><b id="mvWatched">0</b><span>看过</span></div>
     </div>
     <div class="panel">
       <div class="panel-head"><b>🎬 我的片单</b><span class="hint" id="mvAvg">还没有评分</span></div>
       <div class="mini-stats" id="mvStat"></div>
     </div>
     <div class="seg" id="mvSeg">
-      <button class="seg-btn active" data-mvfilter="all">全部</button>
-      <button class="seg-btn" data-mvfilter="cinema">🎬 影院</button>
-      <button class="seg-btn" data-mvfilter="home">🏠 日常</button>
+      <button class="seg-btn active" data-mvfilter="all">全部 · <span id="mvSegAll">0</span></button>
+      <button class="seg-btn" data-mvfilter="cinema">🎬 影院 · <span id="mvSegCinema">0</span></button>
+      <button class="seg-btn" data-mvfilter="home">🏠 日常 · <span id="mvSegHome">0</span></button>
     </div>
     <div class="sec-title"><span>电影 · <span id="mvTotalHint">0 部</span></span>
       <button class="mini" type="button" id="addMovieBtn">＋ 添加</button></div>
@@ -1410,16 +1410,17 @@ footer .mini{font-size:11.5px;padding:6px 12px}
       if (r > 0) { rated++; sum += r; }
     });
 
-    $('#mvTotal').textContent = all.length;
-    $('#mvCinema').textContent = cinema;
-    $('#mvHome').textContent = home;
+    $('#mvWatching').textContent = watching;
+    $('#mvWant').textContent = want;
+    $('#mvWatched').textContent = watched;
+    $('#mvSegAll').textContent = all.length;
+    $('#mvSegCinema').textContent = cinema;
+    $('#mvSegHome').textContent = home;
     $('#mvTotalHint').textContent = list.length + ' \u90e8' +
       (mvFilter === 'all' ? '' : '\uff08' + MV_PLACE[mvFilter] + '\uff09');
     $('#mvAvg').textContent = rated ? '\u5e73\u5747 ' + (sum / rated).toFixed(1) + ' \u661f' : '\u8fd8\u6ca1\u6709\u8bc4\u5206';
     $('#mvStat').innerHTML = all.length
-      ? '<span>\u5728\u770b <b>' + watching + '</b> \u90e8</span>' +
-        '<span>\u51c6\u5907\u770b <b>' + want + '</b> \u90e8</span>' +
-        '<span>\u770b\u8fc7 <b>' + watched + '</b> \u90e8</span>' +
+      ? '<span>\u8bc4\u8fc7\u5206 <b>' + rated + '</b> \u90e8</span>' +
         '<span>\u672c\u6708\u770b\u4e86 <b>' +
         all.filter(function (m) {
           return mvStatus(m) === 'watched' && m.date && m.date.slice(0, 7) === TODAY.slice(0, 7);
