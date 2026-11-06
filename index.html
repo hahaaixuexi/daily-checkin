@@ -380,6 +380,7 @@ h2{margin:0;font-size:16px;font-weight:680;letter-spacing:-.012em;transition:col
   border-radius:11px;border:1px solid var(--line);background:var(--card-2);color:var(--ink);outline:none;transition:.16s}
 .field input:focus,.field select:focus{border-color:var(--c-today);box-shadow:0 0 0 3px rgba(242,102,139,.12)}
 .field input[type=number]{font-variant-numeric:tabular-nums}
+.field-tip{margin:-6px 0 13px;font-size:11.5px;line-height:1.7;color:var(--muted)}
 .btn{width:100%;font-family:inherit;font-size:14px;font-weight:650;padding:12px;border-radius:12px;border:0;
   background:linear-gradient(100deg,var(--grad-a),var(--grad-b));color:#fff;cursor:pointer;transition:.16s;
   box-shadow:0 8px 20px -10px rgba(242,102,139,.6)}
@@ -648,7 +649,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     <div class="stats">
       <div class="stat"><b id="mvWatching">0</b><span>在看</span></div>
       <div class="stat"><b id="mvWant">0</b><span>准备看</span></div>
-      <div class="stat"><b id="mvWatched">0</b><span>看过</span></div>
+      <div class="stat"><b id="mvWatched">0</b><span>已看</span></div>
     </div>
     <div class="panel">
       <div class="panel-head"><b>🎬 我的片单</b><span class="hint" id="mvAvg">还没有评分</span></div>
@@ -1363,10 +1364,10 @@ footer .mini{font-size:11.5px;padding:6px 12px}
   /* ================= 电影 =================
      两个维度：
        place  场合：'cinema' 影院 / 'home' 日常（默认 home）
-       status 状态：'want' 准备看 → 'watching' 在看 → 'watched' 看过
+       status 状态：'want' 准备看 → 'watching' 在看 → 'watched' 已看
   */
   var MV_PLACE = { cinema: '🎬 影院', home: '🏠 日常' };
-  var MV_STATUS = { want: '准备看', watching: '在看', watched: '看过' };
+  var MV_STATUS = { want: '准备看', watching: '在看', watched: '已看' };
   var MV_ORDER = { watching: 0, want: 1, watched: 2 };
   var MV_NEXT = { want: 'watching', watching: 'watched', watched: 'want' };
   var mvFilter = 'all';
@@ -1532,7 +1533,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
   function modalMovie() {
     var opts = '<option value="want">\u51c6\u5907\u770b</option>' +
       '<option value="watching">\u5728\u770b</option>' +
-      '<option value="watched">\u770b\u8fc7</option>';
+      '<option value="watched">\u5df2\u770b</option>';
     openModal('\u6dfb\u52a0\u4e00\u90e8\u7535\u5f71',
       '<label class="field"><span>\u7247\u540d</span><input id="mMvTitle" type="text" placeholder="\u4f8b\u5982\uff1a\u98de\u9a70\u4eba\u751f3"></label>' +
       '<label class="field"><span>\u5e74\u4efd\uff08\u53ef\u4e0d\u586b\uff09</span><input id="mMvYear" type="text" inputmode="numeric" placeholder="2026"></label>' +
@@ -1541,13 +1542,26 @@ footer .mini{font-size:11.5px;padding:6px 12px}
         '<option value="cinema">🎬 影院</option>' +
         '<option value="home" selected>🏠 日常</option></select></label>' +
       '<label class="field"><span>\u72b6\u6001</span><select id="mMvStatus">' + opts + '</select></label>' +
+      '<label class="field"><span>\u65e5\u671f</span><input id="mMvDate" type="date" value="' + TODAY + '"></label>' +
+      '<p class="field-tip" id="mMvDateTip">\u9009\u300c\u5df2\u770b\u300d\u65f6\u4f1a\u8bb0\u4e0b\u8fd9\u5929\u770b\u7684\uff0c\u9ed8\u8ba4\u4eca\u5929\u3002</p>' +
       '<button class="btn" id="mMvOk">\u52a0\u5230\u7247\u5355</button>');
+    var syncDate = function () {
+      var watched = $('#mMvStatus').value === 'watched';
+      $('#mMvDate').disabled = !watched;
+      $('#mMvDate').style.opacity = watched ? '1' : '.45';
+      $('#mMvDateTip').textContent = watched
+        ? '\u4f1a\u8bb0\u4e0b\u8fd9\u5929\u770b\u7684\uff0c\u9ed8\u8ba4\u4eca\u5929\u3002'
+        : '\u5148\u9009\u300c\u5df2\u770b\u300d\u624d\u80fd\u586b\u65e5\u671f\u3002';
+    };
+    syncDate();
+    $('#mMvStatus').addEventListener('change', syncDate);
     $('#mMvOk').addEventListener('click', function () {
       var t = ($('#mMvTitle').value || '').trim();
       if (!t) { toast('\u7247\u540d\u4e0d\u80fd\u4e3a\u7a7a'); return; }
       var st = $('#mMvStatus').value;
       var pl = $('#mMvPlace').value;
       if (st !== 'want' && st !== 'watching' && st !== 'watched') st = 'want';
+      var dt = ($('#mMvDate').value || '').trim() || TODAY;
       mvArr().push({
         id: 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
         title: t,
@@ -1555,7 +1569,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
         genre: ($('#mMvGenre').value || '').trim(),
         place: pl === 'cinema' ? 'cinema' : 'home',
         status: st,
-        date: st === 'watched' ? TODAY : '',
+        date: st === 'watched' ? dt : '',
         rating: 0,
         note: ''
       });
