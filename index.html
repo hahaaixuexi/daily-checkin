@@ -587,6 +587,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
       <button class="seg-btn" data-life="haircut">✂️ 理发</button>
       <button class="seg-btn" data-life="bedding">🛏️ 被褥</button>
       <button class="seg-btn" data-life="nails">💅 指甲</button>
+      <button class="seg-btn" data-life="ear">👂 采耳</button>
     </div>
     <div class="panel" id="lifeShower">
       <div class="panel-head"><b>洗澡记录</b><span class="hint" id="showerHint">—</span></div>
@@ -614,6 +615,12 @@ footer .mini{font-size:11.5px;padding:6px 12px}
       <div id="nailList"></div>
       <div class="sec-title" style="margin-top:16px"><span>最近记录</span></div>
       <div id="nailHistory" class="row-list"></div>
+    </div>
+    <div class="panel" id="lifeEar" hidden>
+      <div class="panel-head"><b>👂 采耳</b><span class="hint" id="earHint">点一下记下今天，再点取消</span></div>
+      <div id="earList"></div>
+      <div class="sec-title" style="margin-top:16px"><span>最近记录</span></div>
+      <div id="earHistory" class="row-list"></div>
     </div>
   </section>
 
@@ -761,6 +768,8 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     if (!o.life.nails || typeof o.life.nails !== 'object') o.life.nails = {};
     if (!Array.isArray(o.life.nails.hand)) o.life.nails.hand = [];
     if (!Array.isArray(o.life.nails.foot)) o.life.nails.foot = [];
+    if (!Array.isArray(o.life.ear)) o.life.ear = [];
+    if (!o.revive || typeof o.revive !== 'object') o.revive = {};
     o.version = 2;
     return o;
   }
@@ -855,6 +864,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
       parts.forEach(function (p) { if (db[p] !== undefined) patch[p] = db[p]; });
       // 删除标记跟着一起提交，否则本地服务端也会把删掉的并回来
       if (db.tomb && Object.keys(db.tomb).length) patch.tomb = db.tomb;
+      if (db.revive && Object.keys(db.revive).length) patch.revive = db.revive;
       pendingPart = {};
       jobs.push(api('/api/db', {
         method: 'POST',
@@ -1297,9 +1307,22 @@ footer .mini{font-size:11.5px;padding:6px 12px}
 
   /* ================= 删除标记 ================= */
   // 删书 / 删电影时留个墓碑，这样云端合并时不会把删掉的又补回来。
+  // 墓碑记「最后一次删除」的时间，复活表记「最后一次重新添加」的时间。
+  // 两者比时间，谁新谁生效 —— 否则刚取消又记回来，云端墓碑会把它吃掉。
   function bury(kind, id) {
     if (!db.tomb || typeof db.tomb !== 'object') db.tomb = {};
     db.tomb[kind + ':' + id] = Date.now();
+  }
+  function unbury(kind, id) {
+    if (!db.revive || typeof db.revive !== 'object') db.revive = {};
+    db.revive[kind + ':' + id] = Date.now();
+    if (db.tomb) delete db.tomb[kind + ':' + id];
+  }
+  function resolveTomb(target) {
+    if (!target.tomb || !target.revive) return;
+    Object.keys(target.revive).forEach(function (k) {
+      if (target.tomb[k] && target.revive[k] >= target.tomb[k]) delete target.tomb[k];
+    });
   }
   function dropBuried(list, kind) {
     if (!Array.isArray(list)) return list;
@@ -1539,8 +1562,8 @@ footer .mini{font-size:11.5px;padding:6px 12px}
   function addBedding(which) {
     var arr = which === 'sun' ? db.life.bedding.sun : db.life.bedding.wash;
     var i = arr.indexOf(TODAY);
-    if (i >= 0) { arr.splice(i, 1); toast('已取消今天的记录'); }
-    else { arr.push(TODAY); toast(which === 'sun' ? '☀️ 已记下今天晒被子' : '🫧 已记下今天洗被套'); }
+    if (i >= 0) { arr.splice(i, 1); bury('bed' + which, TODAY); toast('已取消今天的记录'); }
+    else { arr.push(TODAY); unbury('bed' + which, TODAY); toast(which === 'sun' ? '☀️ 已记下今天晒被子' : '🫧 已记下今天洗被套'); }
     scheduleSave('life');
     renderBedding();
   }
@@ -1584,15 +1607,15 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     var arr = nailArr(id);
     var t = NAIL_TYPES.filter(function (x) { return x.id === id; })[0] || NAIL_TYPES[0];
     var i = arr.indexOf(TODAY);
-    if (i >= 0) { arr.splice(i, 1); toast('已取消今天的' + t.title); }
-    else { arr.push(TODAY); toast(t.icon + ' 已记下今天' + t.title); }
+    if (i >= 0) { arr.splice(i, 1); bury('nail' + id, TODAY); toast('已取消今天的' + t.title); }
+    else { arr.push(TODAY); unbury('nail' + id, TODAY); toast(t.icon + ' 已记下今天' + t.title); }
     scheduleSave('life');
     renderNails();
   }
 
   function renderNails() {
     $('#nailList').innerHTML = NAIL_TYPES.map(function (t) {
-      var arr = nailArr(t.id);
+      var arr = dropBuried(nailArr(t.id).slice(), 'nail' + t.id);
       var s = bedStatus(lifeLast(arr), t.interval);
       var on = arr.indexOf(TODAY) >= 0;
       return '<div class="life-row">' +
@@ -1606,7 +1629,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
 
     var all = [];
     NAIL_TYPES.forEach(function (t) {
-      nailArr(t.id).forEach(function (d) { all.push({ d: d, t: t }); });
+      dropBuried(nailArr(t.id).slice(), 'nail' + t.id).forEach(function (d) { all.push({ d: d, t: t }); });
     });
     all.sort(function (a, b) { return a.d < b.d ? 1 : -1; });
     if (!all.length) {
@@ -1619,6 +1642,52 @@ footer .mini{font-size:11.5px;padding:6px 12px}
       return '<div class="task-row">' +
         '<span class="ti">' + x.t.icon + '</span>' +
         '<span class="tn">' + x.t.title + '</span>' +
+        '<span class="tv">' + dt.getFullYear() + '-' + pad(dt.getMonth() + 1) + '-' + pad(dt.getDate()) +
+          ' · ' + (n === 0 ? '今天' : n + ' 天前') + '</span>' +
+      '</div>';
+    }).join('');
+  }
+
+  /* ---------- 采耳 ---------- */
+  var EAR_INTERVAL = 30;
+
+  function earArr() {
+    if (!Array.isArray(db.life.ear)) db.life.ear = [];
+    return db.life.ear;
+  }
+
+  function addEar() {
+    var arr = earArr();
+    var i = arr.indexOf(TODAY);
+    if (i >= 0) { arr.splice(i, 1); bury('ear', TODAY); toast('已取消今天的采耳'); }
+    else { arr.push(TODAY); unbury('ear', TODAY); toast('👂 已记下今天采耳'); }
+    scheduleSave('life');
+    renderEar();
+  }
+
+  function renderEar() {
+    var arr = dropBuried(earArr().slice(), 'ear');
+    var s = bedStatus(lifeLast(arr), EAR_INTERVAL);
+    var on = arr.indexOf(TODAY) >= 0;
+    $('#earList').innerHTML = '<div class="life-row">' +
+      '<div class="lr-t"><b>👂 采耳</b><span>建议一个月左右清一次' +
+        (s.due ? ' · 建议 ' + s.due : '') + ' · 累计 ' + arr.length + ' 次</span></div>' +
+      '<span class="bb ' + s.cls + '">' + s.text + '</span>' +
+      '<button class="mini' + (on ? ' primary' : '') + '" data-ear="1">' +
+        (on ? '已采' : '今天采') + '</button>' +
+    '</div>';
+
+    var all = arr.slice().sort(function (a, b) { return a < b ? 1 : -1; });
+    if (!all.length) {
+      $('#earHistory').innerHTML = '<div class="empty">还没有记录<br>点上面的按钮记下第一次</div>';
+      return;
+    }
+    $('#earHistory').innerHTML = all.slice(0, 10).map(function (d) {
+      var dt = parseKey(d);
+      var n = daysBetween(d, TODAY);
+      return '<div class="task-row">' +
+        '<span class="ti">👂</span>' +
+        '<span class="tn">采耳</span>' +
         '<span class="tv">' + dt.getFullYear() + '-' + pad(dt.getMonth() + 1) + '-' + pad(dt.getDate()) +
           ' · ' + (n === 0 ? '今天' : n + ' 天前') + '</span>' +
       '</div>';
@@ -1666,7 +1735,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     document.querySelectorAll('#lifeSeg .seg-btn').forEach(function (b) {
       b.classList.toggle('active', b.dataset.life === lifeView);
     });
-    ['shower', 'hair', 'haircut', 'bedding', 'nails'].forEach(function (k) {
+    ['shower', 'hair', 'haircut', 'bedding', 'nails', 'ear'].forEach(function (k) {
       var el = $('#life' + k.charAt(0).toUpperCase() + k.slice(1));
       if (el) el.hidden = (k !== lifeView);
     });
@@ -1674,6 +1743,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     if (lifeView === 'haircut') renderHaircut();
     if (lifeView === 'bedding') renderBedding();
     if (lifeView === 'nails') renderNails();
+    if (lifeView === 'ear') renderEar();
   }
 
   /* ================= 记录 ================= */
@@ -1920,6 +1990,8 @@ footer .mini{font-size:11.5px;padding:6px 12px}
         toggleLifeDay(lifeView, TODAY);
       } else if (lifeView === 'haircut') {
         addHaircut();
+      } else if (lifeView === 'ear') {
+        addEar();
       } else if (lifeView === 'nails') {
         addNail('hand');
       } else {
@@ -2070,8 +2142,8 @@ footer .mini{font-size:11.5px;padding:6px 12px}
   function toggleLifeDay(kind, k) {
     var arr = kind === 'shower' ? db.life.shower : db.life.hair;
     var i = arr.indexOf(k);
-    if (i >= 0) { arr.splice(i, 1); toast('已取消 ' + k); }
-    else { arr.push(k); toast((kind === 'shower' ? '🚿 洗澡' : '💇 洗头') + '打卡：' + k); }
+    if (i >= 0) { arr.splice(i, 1); bury(kind, k); toast('已取消 ' + k); }
+    else { arr.push(k); unbury(kind, k); toast((kind === 'shower' ? '🚿 洗澡' : '💇 洗头') + '打卡：' + k); }
     scheduleSave('life');
     renderLife();
   }
@@ -2113,6 +2185,8 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     if (b) addBedding(b.dataset.bed);
     var n = e.target.closest('[data-nail]');
     if (n) addNail(n.dataset.nail);
+    var ea = e.target.closest('[data-ear]');
+    if (ea) addEar();
   });
 
   /* ---- 记录 ---- */
@@ -2492,8 +2566,14 @@ footer .mini{font-size:11.5px;padding:6px 12px}
 
     // 0) 删除标记：两边谁删过都算删（墓碑越多只会多删，不会把删掉的救回来）
     Object.keys(extra.tomb || {}).forEach(function (k) {
-      if (!target.tomb[k]) target.tomb[k] = extra.tomb[k];
+      var a = target.tomb[k] || 0, b = extra.tomb[k] || 0;
+      if (b > a) target.tomb[k] = b;
     });
+    Object.keys(extra.revive || {}).forEach(function (k) {
+      var a = target.revive[k] || 0, b = extra.revive[k] || 0;
+      if (b > a) target.revive[k] = b;
+    });
+    resolveTomb(target);
 
     // 1) 打卡日期：target 没有的补回来
     Object.keys(extra.days || {}).forEach(function (k) {
@@ -2533,6 +2613,14 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     ['hand', 'foot'].forEach(function (k) {
       added += unionInto(target.life.nails[k], extra.life.nails[k], function (x) { return String(x); });
     });
+    added += unionInto(target.life.ear, extra.life.ear, function (x) { return String(x); });
+
+    // 取消过的记录留了墓碑：合并回来之后再按墓碑剔一遍，
+    // 否则云端「只增不减」会把刚取消的又补回去。
+    ['shower', 'hair'].forEach(function (k) { dropBuried(target.life[k], k); });
+    ['sun', 'wash'].forEach(function (k) { dropBuried(target.life.bedding[k], 'bed' + k); });
+    ['hand', 'foot'].forEach(function (k) { dropBuried(target.life.nails[k], 'nail' + k); });
+    dropBuried(target.life.ear, 'ear');
 
     // 5.5) 电影：按 id 合并，保留本机已有的评分
     added += unionInto(target.movies, extra.movies, function (m) { return m && (m.id || m.title); });
@@ -2548,6 +2636,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     });
 
     // 7) 最后按墓碑把删掉的书 / 电影清掉
+    resolveTomb(target);
     dropBuried(target.books, 'books');
     dropBuried(target.movies, 'movies');
 
