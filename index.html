@@ -746,8 +746,8 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     { id: 'alipay',  icon: '💰', title: '支付宝签到',   sub: '打开支付宝，签到领积分', color: '#2f9de0' },
     { id: 'jiaoshui', icon: '🌱', title: '支付宝浇水领绿植', sub: '蚂蚁森林浇 3 次水，攒能量种树领绿植', color: '#1c9866', type: 'count', goal: 3, unit: '次', green: true, tag: '养成' },
     { id: 'sport',   icon: '💪', title: '运动 30 分钟', sub: '俯卧撑 / 深蹲，可以分组做', color: '#f08a3c', type: 'timer', minutes: 30, tag: '计时' },
-    { id: 'squat5',  icon: '🦵', title: '深蹲 20 次 × 5 组', sub: '一组 20 个，共 100 个，做完点一组', color: '#5f9e4a', type: 'count', goal: 5, unit: '组', tag: '训练', linkSport: 'squat', perSet: 20 },
-    { id: 'push5',   icon: '🏋️', title: '俯卧撑 5 次 × 5 组', sub: '一组 5 个，共 25 个，做完点一组', color: '#c2653f', type: 'count', goal: 5, unit: '组', tag: '训练', linkSport: 'pushup', perSet: 5 },
+    { id: 'squat5',  icon: '🦵', title: '深蹲 20 次',   sub: '一天 20 个，做完勾上', color: '#5f9e4a', tag: '训练', linkSport: 'squat', perSet: 20 },
+    { id: 'push5',   icon: '🏋️', title: '俯卧撑 5 次',  sub: '一天 5 个，做完勾上', color: '#c2653f', tag: '训练', linkSport: 'pushup', perSet: 5 },
     { id: 'water',   icon: '💧', title: '多喝水',       sub: '一天八杯，一次一杯', color: '#3aa7d8', type: 'water' },
     { id: 'egg',     icon: '🥚', title: '吃一个鸡蛋',   sub: '煮蛋、煎蛋、蒸蛋都算', color: '#e8a33d' }
   ];
@@ -1174,8 +1174,9 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     return sum;
   }
 
-  // 计数型训练任务（深蹲/俯卧撑）跟运动页共用一份数据：
-  // 点第 N 组就是把「今天做了 N 组」同步过去，回退就撤掉多余的组。
+  // 训练任务（深蹲/俯卧撑）跟运动页共用一份数据：
+  // 勾上就往今天记一组（每组 t.perSet 个），取消就把那组撤掉。
+  // delta 是组数差量，正数加组、负数撤组。
   function syncSetsToSport(t, delta) {
     if (!t || !t.linkSport || !t.perSet || !delta) return;
     var e = sportEntry(t.linkSport, TODAY, delta > 0);
@@ -1964,6 +1965,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     var rows = TASKS.map(function (t) {
       var yes = isDoneIn(d, t), val = '';
       if (t.type === 'water') val = ((d && d.water) || 0) + ' / ' + WATER_GOAL + ' 杯';
+      else if (t.perSet && t.type !== 'count') val = yes ? t.perSet + ' 个' : '';
       else if (t.type === 'count') val = ((d && d.counts && d.counts[t.id]) || 0) + ' / ' + t.goal + ' ' + (t.unit || '个');
       else if (t.type === 'timer') {
         var left = d && d.timers ? d.timers[t.id] : null;
@@ -2202,6 +2204,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
       else if (t.type === 'count') { var cs = d.counts || (d.counts = {}); var cb = Number(cs[t.id] || 0); cs[t.id] = next ? t.goal : 0; syncSetsToSport(t, cs[t.id] - cb); }
       else if (next) d.done[t.id] = true;
       else delete d.done[t.id];
+      if (t.linkSport && t.type !== 'count') syncSetsToSport(t, next ? 1 : -1);
       if (t.type === 'timer' && next) { var tm = getTimer(id); if (tm.handle) stopTimer(id); }
       scheduleSave('days', TODAY);
       renderToday();
