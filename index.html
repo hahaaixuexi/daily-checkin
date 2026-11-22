@@ -744,12 +744,13 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     { id: 'game',    icon: '🎮', title: '打一局游戏',   sub: 'CSGO 或 三角洲 · 爆破模式，一局就好', color: '#5b7cfa', tag: '娱乐' },
     { id: 'delta',   icon: '🎯', title: '三角洲每日巡查', sub: '巡查 8 个视频，点数字记进度', color: '#d96a3a', type: 'count', goal: 8, unit: '个视频', tag: '游戏' },
     { id: 'alipay',  icon: '💰', title: '支付宝签到',   sub: '打开支付宝，签到领积分', color: '#2f9de0' },
-    { id: 'jiaoshui', icon: '🌱', title: '支付宝浇水领绿植', sub: '蚂蚁森林浇 3 次水，攒能量种树领绿植', color: '#1c9866', type: 'count', goal: 3, unit: '次', green: true, tag: '养成' },
+    { id: 'zhima',    icon: '🌱', title: '芝麻信用',     sub: '支付宝 → 芝麻信用，领一次信用任务', color: '#1c9866', tag: '信用', legacy: 'jiaoshui', legacyNeed: 3 },
     { id: 'sport',   icon: '💪', title: '运动 30 分钟', sub: '俯卧撑 / 深蹲，可以分组做', color: '#f08a3c', type: 'timer', minutes: 30, tag: '计时' },
     { id: 'squat5',  icon: '🦵', title: '深蹲 20 次',   sub: '一组 20 个，点一下记一组', color: '#5f9e4a', type: 'count', goal: 5, unit: '组', tag: '训练', linkSport: 'squat', perSet: 20 },
     { id: 'push5',   icon: '🏋️', title: '俯卧撑 5 次',  sub: '一组 5 个，点一下记一组', color: '#c2653f', type: 'count', goal: 5, unit: '组', tag: '训练', linkSport: 'pushup', perSet: 5 },
     { id: 'water',   icon: '💧', title: '多喝水',       sub: '一天八杯，一次一杯', color: '#3aa7d8', type: 'water' },
-    { id: 'egg',     icon: '🥚', title: '吃一个鸡蛋',   sub: '煮蛋、煎蛋、蒸蛋都算 · 点一下记一个', color: '#e8a33d', type: 'count', goal: 3, unit: '个', need: 1 }
+    { id: 'egg',     icon: '🥚', title: '吃一个鸡蛋',   sub: '煮蛋、煎蛋、蒸蛋都算 · 点一下记一个', color: '#e8a33d', type: 'count', goal: 3, unit: '个', need: 1 },
+    { id: 'huabei',  icon: '💳', title: '还花呗',       sub: '每周一还上周的花呗 · 只在周一出现', color: '#c05f8a', type: 'weekly', weekday: 1, since: '2026-11-22', tag: '周任务' }
   ];
   function taskById(id) {
     for (var i = 0; i < TASKS.length; i++) if (TASKS[i].id === id) return TASKS[i];
@@ -927,19 +928,42 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     if (!db.days[k]) db.days[k] = emptyDay();
     return normalizeDay(db.days[k]);
   }
-  function isDoneIn(d, t) {
+  function isDoneIn(d, t, k) {
     if (!d) return false;
     if (t.type === 'water') return (d.water || 0) >= WATER_GOAL;
     if (t.type === 'count') return ((d.counts && d.counts[t.id]) || 0) >= (t.need || t.goal);
-    return !!(d.done && d.done[t.id]);
+    if (d.done && d.done[t.id]) return true;
+    // 换过名字的任务（浇水 → 芝麻信用）：只看今天之前的老日子，
+    // 不然今天取消勾选会被老记录又顶回来，永远取消不掉。
+    if (t.legacy && k && k !== TODAY) {
+      var lv = (d.counts && d.counts[t.legacy]) || 0;
+      if (lv >= (t.legacyNeed || 1)) return true;
+    }
+    return false;
   }
-  function doneCountOf(d) {
+
+  // 当天该做哪些：周任务只在它那一个星期几出现（比如还花呗只在周一），
+  // 否则周一到不了、其它天又被它顶着永远凑不满。
+  function dayTasks(k) {
+    var dt = parseKey(k), wd = dt.getDay();
+    return TASKS.filter(function (t) {
+      if (t.type !== 'weekly') return true;
+      if (t.since && k < t.since) return false;   // 这条任务上线之前的日子不算
+      return wd === (t.weekday === undefined ? 1 : t.weekday);
+    });
+  }
+
+  function doneCountOf(d, k) {
     if (!d) return 0;
     var n = 0;
-    TASKS.forEach(function (t) { if (isDoneIn(d, t)) n++; });
+    var kk = k || TODAY;
+    dayTasks(kk).forEach(function (t) { if (isDoneIn(d, t, kk)) n++; });
     return n;
   }
-  function fullDay(k) { return doneCountOf(dayOf(k)) >= TASKS.length; }
+  function fullDay(k) {
+    var list = dayTasks(k);
+    return doneCountOf(dayOf(k), k) >= list.length;
+  }
 
   function streak() {
     var s = 0, cur = todayDate();
@@ -1073,20 +1097,21 @@ footer .mini{font-size:11.5px;padding:6px 12px}
       '</div>' +
     '</article>';
   }
-  listEl.innerHTML = TASKS.map(cardHTML).join('');
+  listEl.innerHTML = dayTasks(TODAY).map(cardHTML).join('');
 
   var lastCount = -1;
 
   function renderToday() {
     var d = dayOf(TODAY);
-    var n = doneCountOf(d), total = TASKS.length;
+    var list = dayTasks(TODAY);
+    var n = doneCountOf(d, TODAY), total = list.length;
     var tEl = document.getElementById('totalOf');
     if (tEl) tEl.textContent = '/' + total;
 
-    TASKS.forEach(function (t) {
+    list.forEach(function (t) {
       var card = document.querySelector('.card[data-id="' + t.id + '"]');
       if (!card) return;
-      var done = isDoneIn(d, t);
+      var done = isDoneIn(d, t, TODAY);
       card.classList.toggle('done', done);
       var chk = card.querySelector('.check');
       if (chk) chk.setAttribute('aria-pressed', done ? 'true' : 'false');
@@ -1126,10 +1151,10 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     for (var i = 6; i >= 0; i--) {
       var dd = new Date(base.getFullYear(), base.getMonth(), base.getDate());
       dd.setDate(dd.getDate() - i);
-      var k = keyOf(dd), cnt = doneCountOf(dayOf(k));
+      var k = keyOf(dd), cnt = doneCountOf(dayOf(k), k), cntAll = dayTasks(k).length;
       html += '<div class="daycell' + (i === 0 ? ' today' : '') + '" title="' + k + ' · 完成 ' + cnt + ' 项">' +
         '<span class="wd">' + (i === 0 ? '今' : WEEK_SHORT[dd.getDay()]) + '</span>' +
-        '<span class="track"><span class="fill" style="width:' + Math.round(cnt / TASKS.length * 100) + '%"></span></span>' +
+        '<span class="track"><span class="fill" style="width:' + Math.round(cnt / cntAll * 100) + '%"></span></span>' +
       '</div>';
     }
     $('#week').innerHTML = html;
@@ -1886,7 +1911,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
   var viewMonth = new Date(todayDate().getFullYear(), todayDate().getMonth(), 1);
   var selected = TODAY;
 
-  function allKeys() { return Object.keys(db.days).filter(function (k) { return doneCountOf(db.days[k]) > 0; }).sort(); }
+  function allKeys() { return Object.keys(db.days).filter(function (k) { return doneCountOf(db.days[k], k) > 0; }).sort(); }
 
   function bestStreak() {
     var keys = allKeys(), best = 0, cur = 0, prev = null;
@@ -1925,8 +1950,8 @@ footer .mini{font-size:11.5px;padding:6px 12px}
 
     for (var d = 1; d <= dim; d++) {
       var k = y + '-' + pad(m + 1) + '-' + pad(d);
-      var cnt = doneCountOf(dayOf(k));
-      var ratio = cnt / TASKS.length;
+      var cnt = doneCountOf(dayOf(k), k), cntAll = dayTasks(k).length;
+      var ratio = cnt / cntAll;
       var cls = 'cal-cell';
       if (ratio === 0) cls += ' r0';
       else if (ratio < 0.34) cls += ' r1';
@@ -1937,7 +1962,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
       if (k === selected) cls += ' sel';
       if (new Date(y, m, d) > td) cls += ' future';
       var day = dayOf(k);
-      var tip = k + ' · ' + cnt + '/' + TASKS.length + (day && day.water ? ' · 喝水 ' + day.water + ' 杯' : '');
+      var tip = k + ' · ' + cnt + '/' + cntAll + (day && day.water ? ' · 喝水 ' + day.water + ' 杯' : '');
       html += '<button class="' + cls + '" type="button" data-date="' + k + '" title="' + tip + '">' +
         '<span class="d">' + d + '</span>' +
         (ratio >= 1 ? '<span class="dotfull"></span>' : '<span class="m"></span>') +
@@ -1950,11 +1975,12 @@ footer .mini{font-size:11.5px;padding:6px 12px}
 
   function renderDetail() {
     var k = selected, d = dayOf(k), dt = parseKey(k);
-    var cnt = doneCountOf(d);
+    var list = dayTasks(k), total = list.length;
+    var cnt = doneCountOf(d, k);
     var label = dt.getFullYear() + ' 年 ' + (dt.getMonth() + 1) + ' 月 ' + dt.getDate() + ' 日 · ' + WEEKDAY[dt.getDay()];
     var head = '<div class="detail-head">' +
       '<span class="detail-date">' + label + (k === TODAY ? '（今天）' : '') + '</span>' +
-      '<span class="detail-sub">' + cnt + ' / ' + TASKS.length + ' 完成' + (cnt === TASKS.length ? ' · 全勤 ✅' : '') + '</span>' +
+      '<span class="detail-sub">' + cnt + ' / ' + total + ' 完成' + (cnt === total ? ' · 全勤 ✅' : '') + '</span>' +
     '</div>';
 
     if (!d && !sportTotal('pushup', k) && !sportTotal('squat', k) && !readMinutes(k)) {
@@ -1962,9 +1988,10 @@ footer .mini{font-size:11.5px;padding:6px 12px}
       return;
     }
 
-    var rows = TASKS.map(function (t) {
-      var yes = isDoneIn(d, t), val = '';
-      if (t.type === 'water') val = ((d && d.water) || 0) + ' / ' + WATER_GOAL + ' 杯';
+    var rows = list.map(function (t) {
+      var yes = isDoneIn(d, t, k), val = '';
+      if (t.type === 'weekly') val = yes ? '已还' : '待还';
+      else if (t.type === 'water') val = ((d && d.water) || 0) + ' / ' + WATER_GOAL + ' 杯';
       else if (t.perSet && t.type !== 'count') val = yes ? t.perSet + ' 个' : '';
       else if (t.type === 'count') val = ((d && d.counts && d.counts[t.id]) || 0) + ' / ' + t.goal + ' ' + (t.unit || '个');
       else if (t.type === 'timer') {
@@ -2000,14 +2027,14 @@ footer .mini{font-size:11.5px;padding:6px 12px}
       return;
     }
     $('#recentList').innerHTML = keys.map(function (k) {
-      var d = dayOf(k), cnt = doneCountOf(d), dt = parseKey(k);
+      var d = dayOf(k), cnt = doneCountOf(d, k), cntAll = dayTasks(k).length, dt = parseKey(k);
       return '<div class="task-row click" data-jump="' + k + '">' +
-        '<span class="ti">' + (cnt === TASKS.length ? '🏆' : '·') + '</span>' +
+        '<span class="ti">' + (cnt === cntAll ? '🏆' : '·') + '</span>' +
         '<span class="tn">' + (dt.getMonth() + 1) + ' 月 ' + dt.getDate() + ' 日 · ' + WEEK_SHORT[dt.getDay()] +
           (k === TODAY ? '（今天）' : '') + '</span>' +
-        '<span class="tv">' + cnt + ' / ' + TASKS.length + '</span>' +
-        '<span class="st" style="color:' + (cnt === TASKS.length ? '#3fa46a' : 'var(--muted)') + '">' +
-          (cnt === TASKS.length ? '✓' : '') + '</span>' +
+        '<span class="tv">' + cnt + ' / ' + cntAll + '</span>' +
+        '<span class="st" style="color:' + (cnt === cntAll ? '#3fa46a' : 'var(--muted)') + '">' +
+          (cnt === cntAll ? '✓' : '') + '</span>' +
       '</div>';
     }).join('');
   }
@@ -2200,7 +2227,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     if (act === 'start') { toggleTimer(id); return; }
     if (act === 'reset') { resetTimer(id); toast('计时已重置'); return; }
     if (act === 'toggle' || (!hit && e.target.closest('.head, .sub'))) {
-      var next = !isDoneIn(d, t);
+      var next = !isDoneIn(d, t, TODAY);
       if (t.id === 'water') d.water = next ? WATER_GOAL : 0;
       else if (t.type === 'count') { var cs = d.counts || (d.counts = {}); var cb = Number(cs[t.id] || 0); cs[t.id] = next ? (t.need || t.goal) : 0; syncSetsToSport(t, cs[t.id] - cb); }
       else if (next) d.done[t.id] = true;
