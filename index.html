@@ -215,6 +215,8 @@ h2{margin:0;font-size:16px;font-weight:680;letter-spacing:-.012em;transition:col
 .bar.sport>span{background:linear-gradient(90deg,#ffc38b,#f08a3c)}
 .bar.books>span{background:linear-gradient(90deg,#c3b5ff,#8b6cf0)}
 
+.est-line{margin:-3px 0 12px;font-size:11.5px;line-height:1.72;color:var(--muted)}
+.est-line b{color:var(--ink);font-weight:650}
 .quick{display:flex;gap:7px;flex-wrap:wrap}
 .quick button{flex:1;min-width:64px;font-family:inherit;font-size:13px;font-weight:650;padding:9px 6px;
   border-radius:10px;border:1px solid var(--line);background:var(--card-2);color:var(--ink);cursor:pointer;transition:.16s}
@@ -562,6 +564,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
       </div>
       <div class="goal-row"><span>今日 <b id="spGoalNum">0</b> / <span id="spGoalMax">50</span> 个</span><span id="spPct">0%</span></div>
       <div class="bar sport"><span id="spBar"></span></div>
+      <p class="est-line" id="spEst">按组数折算：20 个深蹲 ≈ 1 分半 · 今天还没记组数</p>
       <div class="quick" id="spQuick">
         <button data-add="10">+10</button>
         <button data-add="20">+20</button>
@@ -755,8 +758,9 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     { id: 'alipay',  icon: '💰', title: '支付宝签到',   sub: '打开支付宝，签到领积分', color: '#2f9de0' },
     { id: 'zhima',    icon: '🌱', title: '芝麻信用',     sub: '支付宝 → 芝麻信用，领一次信用任务', color: '#1c9866', tag: '信用', legacy: 'jiaoshui', legacyNeed: 3 },
     { id: 'sport',   icon: '💪', title: '运动 30 分钟', sub: '俯卧撑 / 深蹲，可以分组做', color: '#f08a3c', type: 'timer', minutes: 30, tag: '计时' },
-    { id: 'squat5',  icon: '🦵', title: '深蹲 20 次',   sub: '一组 20 个，点一下记一组', color: '#5f9e4a', type: 'count', goal: 5, unit: '组', tag: '训练', linkSport: 'squat', perSet: 20 },
-    { id: 'push5',   icon: '🏋️', title: '俯卧撑 5 次',  sub: '一组 5 个，点一下记一组', color: '#c2653f', type: 'count', goal: 5, unit: '组', tag: '训练', linkSport: 'pushup', perSet: 5 },
+    { id: 'squat5',  icon: '🦵', title: '深蹲 20 次',   sub: '一组 20 个，点一下记一组', color: '#5f9e4a', type: 'count', goal: 5, unit: '组', tag: '训练', linkSport: 'squat', perSet: 20, secPerSet: 90 },
+    { id: 'push5',   icon: '🏋️', title: '俯卧撑 5 次',  sub: '一组 5 个，点一下记一组', color: '#c2653f', type: 'count', goal: 5, unit: '组', tag: '训练', linkSport: 'pushup', perSet: 5, secPerSet: 30 },
+    { id: 'floss',   icon: '🦷', title: '用牙线清理牙齿', sub: '每颗牙缝都过一遍，睡前做', color: '#5aa9c9', tag: '健康' },
     { id: 'water',   icon: '💧', title: '多喝水',       sub: '一天八杯，一次一杯', color: '#3aa7d8', type: 'water' },
     { id: 'egg',     icon: '🥚', title: '吃一个鸡蛋',   sub: '煮蛋、煎蛋、蒸蛋都算 · 点一下记一个', color: '#e8a33d', type: 'count', goal: 3, unit: '个', need: 1 },
     { id: 'huabei',  icon: '💳', title: '还花呗',       sub: '每周一还上周的花呗 · 只在周一出现', color: '#c05f8a', type: 'weekly', weekday: 1, since: '2026-11-22', tag: '周任务' }
@@ -777,6 +781,8 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     if (typeof d.water !== 'number') d.water = 0;
     if (!d.timers || typeof d.timers !== 'object') d.timers = {};
     if (!d.counts || typeof d.counts !== 'object') d.counts = {};
+    // autoOff：用户手动取消过「自动折算完成」的任务（目前只有运动），记一笔，别又自动顶回来。
+    if (!d.autoOff || typeof d.autoOff !== 'object') d.autoOff = {};
     return d;
   }
 
@@ -941,6 +947,10 @@ footer .mini{font-size:11.5px;padding:6px 12px}
   function isDoneIn(d, t, k) {
     if (!d) return false;
     if (t.type === 'water') return (d.water || 0) >= WATER_GOAL;
+    // 运动 30 分钟：除了真跑满计时，净运动时长按组数折算够 30 分钟也算完成；
+    // 用户手动取消过的（autoOff）不自动顶回来。
+    if (t.id === 'sport' && !(d.autoOff && d.autoOff.sport) &&
+        sportEstMin(k || TODAY) >= (t.minutes || 30)) return true;
     if (t.type === 'count') return ((d.counts && d.counts[t.id]) || 0) >= (t.need || t.goal);
     if (d.done && d.done[t.id]) return true;
     // 换过名字的任务（浇水 → 芝麻信用）：只看今天之前的老日子，
@@ -1068,7 +1078,8 @@ footer .mini{font-size:11.5px;padding:6px 12px}
 
   function extraHTML(t) {
     if (t.type === 'timer') {
-      return '<div class="timer">' +
+      return (t.id === 'sport' ? '<p class="est-line" data-est></p>' : '') +
+        '<div class="timer">' +
         '<span class="clock" data-clock="' + t.id + '">' + pad(t.minutes) + ':00</span>' +
         '<button class="mini primary" type="button" data-act="start">开始</button>' +
         '<button class="mini" type="button" data-act="reset">重置</button>' +
@@ -1131,6 +1142,10 @@ footer .mini{font-size:11.5px;padding:6px 12px}
         for (var i = 0; i < cups.length; i++) cups[i].classList.toggle('on', i < w);
         var cc = card.querySelector('[data-cup-count]');
         if (cc) cc.textContent = w + ' / ' + WATER_GOAL;
+      }
+      if (t.id === 'sport') {
+        var estEl = card.querySelector('[data-est]');
+        if (estEl) estEl.textContent = estText(TODAY);
       }
       if (t.type === 'count') {
         var vc = (d && d.counts && d.counts[t.id]) || 0;
@@ -1209,6 +1224,78 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     return sum;
   }
 
+  // 某天某个动作做了几组
+  function setsOn(type, k) {
+    var e = sportEntry(type, k || TODAY, false);
+    return e && e.sets ? e.sets.length : 0;
+  }
+  function setsToday(type) { return setsOn(type, TODAY); }
+  // 每组折算多少秒：深蹲一组 20 个 ≈ 一分半（90 秒）；俯卧撑一组 5 个 ≈ 30 秒
+  function secPerSetOf(type) {
+    var t = TASKS.filter(function (x) { return x.linkSport === type; })[0];
+    return (t && t.secPerSet) || 0;
+  }
+  function sportEstSec(k) {
+    var sec = 0, kk = k || TODAY;
+    ['squat', 'pushup'].forEach(function (type) {
+      var e = sportEntry(type, kk, false);
+      if (!e || !e.sets) return;
+      sec += e.sets.length * secPerSetOf(type);
+    });
+    return sec;
+  }
+  function sportEstMin(k) { return Math.round(sportEstSec(k) / 60); }
+
+  // 估算用时的中文说明，今天页和运动页共用。
+  // 折算口径：20 个深蹲一组算 1 分半（90 秒），5 个俯卧撑一组算 30 秒。
+  function estText(k) {
+    var kk = k || TODAY;
+    var sq = setsOn('squat', kk), pu = setsOn('pushup', kk);
+    var goal = (taskById('sport') && taskById('sport').minutes) || 30;
+    var min = sportEstMin(kk);
+    if (!sq && !pu) return '按组数折算：20 个深蹲 ≈ 1 分半 · 今天还没记组数';
+    var parts = [];
+    if (sq) parts.push('深蹲 ' + sq + ' 组');
+    if (pu) parts.push('俯卧撑 ' + pu + ' 组');
+    var line = '净运动 ' + min + ' / ' + goal + ' 分钟（' + parts.join(' · ') + '）';
+    if (min < goal) {
+      var more = Math.ceil((goal - min) * 60 / secPerSetOf('squat'));
+      line += ' · 还差约 ' + more + ' 组深蹲';
+    }
+    return line;
+  }
+
+  // 运动页记了几组，今天就显示几组（反向同步，避免两边对不上）
+  function reflectSetsToCounts() {
+    var d = ensureDay(TODAY), changed = false;
+    TASKS.forEach(function (t) {
+      if (!t.linkSport) return;
+      var n = Math.min(setsToday(t.linkSport), t.need || t.goal);
+      var cur = Number((d.counts || {})[t.id] || 0);
+      if (!d.counts) d.counts = {};
+      if (cur !== n) { d.counts[t.id] = n; changed = true; }
+    });
+    if (changed) { scheduleSave('days', TODAY); renderToday(); }
+    return changed;
+  }
+
+  // 净运动折算够 30 分钟时给个反馈。完成状态本身由 isDoneIn 算出来（不写进 done），
+  // 这样把最后一组撤销掉，卡片会自动变回未完成，不会留个假的已完成。
+  var autoSportWas = null;
+  function maybeAutoSport() {
+    var t = taskById('sport');
+    if (!t) return;
+    var d = ensureDay(TODAY);
+    var on = !(d.autoOff && d.autoOff.sport) && sportEstMin(TODAY) >= (t.minutes || 30);
+    if (on && autoSportWas === false) {
+      renderToday();
+      toast('💪 净运动已够 ' + (t.minutes || 30) + ' 分钟，运动任务自动完成');
+      burst(16);
+    }
+    autoSportWas = on;
+    renderToday();
+  }
+
   // 训练任务（深蹲/俯卧撑）跟运动页共用一份数据：
   // 勾上就往今天记一组（每组 t.perSet 个），取消就把那组撤掉。
   // delta 是组数差量，正数加组、负数撤组。
@@ -1242,6 +1329,8 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     e.sets.push({ n: n, ts: pad(new Date().getHours()) + ':' + pad(new Date().getMinutes()) });
     scheduleSave('sport');
     renderSport();
+    reflectSetsToCounts();
+    maybeAutoSport();
     toast('已记下 ' + n + ' 个' + (type === 'pushup' ? '俯卧撑' : '深蹲'));
   }
   function undoSet(type) {
@@ -1255,6 +1344,8 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     }
     scheduleSave('sport');
     renderSport();
+    reflectSetsToCounts();
+    maybeAutoSport();
     toast('已撤销一组 ' + (x.n || '') + ' 个');
   }
 
@@ -1275,6 +1366,8 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     $('#spPct').textContent = pct + '%';
     $('#spBar').style.width = pct + '%';
     $('#spAll').textContent = '累计 ' + sportAll(t) + ' 个';
+    var est = $('#spEst');
+    if (est) est.textContent = estText(TODAY);
 
     document.querySelectorAll('#spSeg .seg-btn').forEach(function (b) {
       b.classList.toggle('active', b.dataset.type === t);
@@ -2054,7 +2147,10 @@ footer .mini{font-size:11.5px;padding:6px 12px}
       else if (t.type === 'count') val = ((d && d.counts && d.counts[t.id]) || 0) + ' / ' + t.goal + ' ' + (t.unit || '个');
       else if (t.type === 'timer') {
         var left = d && d.timers ? d.timers[t.id] : null;
-        if (typeof left !== 'number') val = yes ? '已完成' : '';
+        if (t.id === 'sport' && sportEstMin(k) > 0) {
+          // 运动任务优先显示按组数折算的净时长，那才是实际做了多久
+          val = '净 ' + sportEstMin(k) + ' 分钟';
+        } else if (typeof left !== 'number') val = yes ? '已完成' : '';
         else if (left <= 0) val = '计时完成';
         else val = '剩 ' + fmt(left);
       }
@@ -2070,9 +2166,14 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     var p = sportTotal('pushup', k), s = sportTotal('squat', k), r = readMinutes(k);
     if (p) extra.push('俯卧撑 ' + p + ' 个');
     if (s) extra.push('深蹲 ' + s + ' 个');
+    if (p || s) {
+      var scon = sportEstMin(k);
+      if (scon) extra.push('净运动约 ' + scon + ' 分钟');
+    }
     if (r) extra.push('阅读 ' + r + ' 分钟');
     var extraHTML2 = extra.length
-      ? '<div class="task-row" style="margin-top:8px"><span class="ti">📝</span><span class="tn">' + extra.join(' · ') + '</span><span class="tv"></span><span class="st"></span></div>'
+      ? '<div class="task-row" style="margin-top:8px"><span class="ti">📝</span><span class="tn">' +
+        '<b style="font-weight:650">运动明细</b> · ' + extra.join(' · ') + '</span><span class="tv"></span><span class="st"></span></div>'
       : '';
 
     $('#detail').innerHTML = head + rows + extraHTML2;
@@ -2274,7 +2375,8 @@ footer .mini{font-size:11.5px;padding:6px 12px}
       var counts = d.counts || (d.counts = {});
       var before = Number(counts[id] || 0);
       counts[id] = (before === vi) ? vi - 1 : vi;
-      syncSetsToSport(t, counts[id] - before);
+      // 以运动页的组数为准补差：点第 N 格就是今天一共 N 组，不会在已有组数上再叠加
+      if (t.linkSport) syncSetsToSport(t, counts[id] - setsToday(t.linkSport));
       var needN = t.need || t.goal;
       if (before < needN && counts[id] >= needN) {
         burst(24);
@@ -2289,9 +2391,13 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     if (act === 'toggle' || (!hit && e.target.closest('.head, .sub'))) {
       var next = !isDoneIn(d, t, TODAY);
       if (t.id === 'water') d.water = next ? WATER_GOAL : 0;
-      else if (t.type === 'count') { var cs = d.counts || (d.counts = {}); var cb = Number(cs[t.id] || 0); cs[t.id] = next ? (t.need || t.goal) : 0; syncSetsToSport(t, cs[t.id] - cb); }
-      else if (next) d.done[t.id] = true;
-      else delete d.done[t.id];
+      else if (t.type === 'count') {
+        var cs = d.counts || (d.counts = {});
+        cs[t.id] = next ? (t.need || t.goal) : 0;
+        if (t.linkSport) syncSetsToSport(t, cs[t.id] - setsToday(t.linkSport));
+      }
+      else if (next) { d.done[t.id] = true; if (t.id === 'sport' && d.autoOff) delete d.autoOff.sport; }
+      else { delete d.done[t.id]; if (t.id === 'sport') { d.autoOff = d.autoOff || {}; d.autoOff.sport = 1; } }
       if (t.linkSport && t.type !== 'count') syncSetsToSport(t, next ? 1 : -1);
       if (t.type === 'timer' && next) { var tm = getTimer(id); if (tm.handle) stopTimer(id); }
       scheduleSave('days', TODAY);
@@ -2472,14 +2578,22 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
   });
   $('#resetBtn').addEventListener('click', function () {
-    if (!confirm('重置今天全部打卡记录？（运动、读书记录不受影响）')) return;
+    if (!confirm('重置今天全部打卡记录？（今天记的运动组数也会一起清掉；读书记录不受影响）')) return;
     db.days[TODAY] = emptyDay();
+    // 运动的完成状态是按今天的组数折算出来的，只清 days 是清不掉的，
+    // 今天记过的组数也得一起清，否则重置完运动还亮着。
+    ['pushup', 'squat'].forEach(function (type) {
+      var arr = db.sport[type] || [];
+      db.sport[type] = arr.filter(function (e) { return !e || e.d !== TODAY; });
+    });
+    scheduleSave('sport');
     Object.keys(timers).forEach(function (id) {
       if (timers[id].handle) { clearInterval(timers[id].handle); timers[id].handle = null; }
       timers[id].left = taskById(id).minutes * 60;
       paintClock(id);
     });
     lastCount = -1;
+    autoSportWas = null;
     scheduleSave('days', TODAY);
     renderAll();
     toast('今天已重置，重新开始');
@@ -3177,6 +3291,8 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     stampHeader();
     TASKS.forEach(function (t) { if (t.type === 'timer') getTimer(t.id); });
     renderAll();
+    // 上次在运动页记的组数，启动时补回今天页的格子里，两边一开始就对得上
+    reflectSetsToCounts();
     TASKS.forEach(function (t) { if (t.type === 'timer') paintClock(t.id); });
     updateFab();
     $('#footNote').textContent = cloudOn()
