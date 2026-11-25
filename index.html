@@ -814,6 +814,9 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     if (!Array.isArray(o.life.ear)) o.life.ear = [];
     if (!Array.isArray(o.life.brow)) o.life.brow = [];
     if (!o.revive || typeof o.revive !== 'object') o.revive = {};
+    // 云端拉回来的老数据也先补好 sid，合并时前后端键才能对上
+    backfillSport(o);
+    if (!o.sport.trim || typeof o.sport.trim !== 'object') o.sport.trim = {};
     o.version = 2;
     return o;
   }
@@ -1306,11 +1309,21 @@ footer .mini{font-size:11.5px;padding:6px 12px}
       if (!e) return;
       if (!e.sets) e.sets = [];
       for (var i = 0; i < delta; i++) {
-        e.sets.push({ n: t.perSet, ts: pad(new Date().getHours()) + ':' + pad(new Date().getMinutes()) });
+        e.sets.push({
+          n: t.perSet,
+          ts: pad(new Date().getHours()) + ':' + pad(new Date().getMinutes()),
+          sid: newSetId()
+        });
       }
+      setTrim(t.linkSport, TODAY, e.sets.length);
     } else if (e && e.sets) {
       var cut = Math.min(-delta, e.sets.length);
+      // 撤掉的这几组留墓碑，否则云端合并时又补回来
+      var seenK = {};
+      var keysK = e.sets.map(function (s) { return setKeyOf(s, seenK); });
+      for (var ci = 0; ci < cut; ci++) burySet(keysK[keysK.length - 1 - ci]);
       e.sets.splice(e.sets.length - cut, cut);
+      setTrim(t.linkSport, TODAY, e.sets.length);
       if (!e.sets.length) {
         var arr = sportEntries(t.linkSport);
         var idx = arr.indexOf(e);
@@ -1326,7 +1339,8 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     if (!n) return;
     var e = sportEntry(type, TODAY, true);
     if (!e.sets) e.sets = [];
-    e.sets.push({ n: n, ts: pad(new Date().getHours()) + ':' + pad(new Date().getMinutes()) });
+    e.sets.push({ n: n, ts: pad(new Date().getHours()) + ':' + pad(new Date().getMinutes()), sid: newSetId() });
+    setTrim(type, TODAY, e.sets.length);
     scheduleSave('sport');
     renderSport();
     reflectSetsToCounts();
@@ -1336,7 +1350,11 @@ footer .mini{font-size:11.5px;padding:6px 12px}
   function undoSet(type) {
     var e = sportEntry(type, TODAY, false);
     if (!e || !e.sets || !e.sets.length) { toast('今天还没有记录'); return; }
+    var seenU = {};
+    var keysU = e.sets.map(function (s) { return setKeyOf(s, seenU); });
     var x = e.sets.pop();
+    if (x) burySet(keysU[keysU.length - 1]);
+    setTrim(type, TODAY, e.sets.length);
     if (!e.sets.length) {
       var arr = sportEntries(type);
       var i = arr.indexOf(e);
@@ -1513,6 +1531,118 @@ footer .mini{font-size:11.5px;padding:6px 12px}
       if (tomb[kind + ':' + id]) list.splice(i, 1);
     }
     return list;
+  }
+
+  /* ---------- 运动「组」的墓碑 ---------- */
+  // 每记一组给个稳定 id。撤销时把它埋掉，云端「先读远端再合并」才不会把这组补回来。
+  function newSetId() {
+    return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  }
+  // 老数据没 sid：用「时间|个数|同键第几个」凑一个稳定键
+  function setKeyOf(e, seen) {
+    if (e && e.sid) return e.sid;
+    var base = ((e && e.ts) || '') + '|' + (e && e.n);
+    seen[base] = (seen[base] || 0) + 1;
+    return 'x' + base + '#' + seen[base];
+  }
+  // 老组没有 sid 时补一个确定性的：同一天按位置 + 时间 + 个数。
+  // 不补的话，撤销老组时前后端算出的键不一样，服务端那条合并路径会把组补回来。
+  function backfillSport(obj) {
+    if (!obj || !obj.sport) return obj;
+    ['pushup', 'squat'].forEach(function (type) {
+      var arr = obj.sport[type];
+      if (!Array.isArray(arr)) return;
+      arr.forEach(function (e) {
+        if (!e || !Array.isArray(e.sets)) return;
+        e.sets.forEach(function (s, i) {
+          if (!s || s.sid) return;
+          s.sid = 'l' + (e.d || '') + '#' + i + '|' + ((s.ts) || '') + '|' + s.n;
+        });
+      });
+    });
+    return obj;
+  }
+  function backfillSetIds() { return backfillSport(db); }
+  function burySet(sid) {
+    if (!sid) return;
+    if (!db.tomb || typeof db.tomb !== 'object') db.tomb = {};
+    db.tomb['set:' + sid] = Date.now();
+    // 组墓碑只留最近 7 天，别越攒越大
+    var cut = Date.now() - 7 * 86400000;
+    Object.keys(db.tomb).forEach(function (k) {
+      if (k.indexOf('set:') === 0 && db.tomb[k] < cut) delete db.tomb[k];
+    });
+  }
+  // 按墓碑剔掉撤销过的组，并把空掉的日期整条删掉
+  function dropBuriedSets(list) {
+    var tomb = db.tomb || {};
+    (list || []).forEach(function (e) {
+      if (!e || !Array.isArray(e.sets)) return;
+      var seen = {};
+      e.sets = e.sets.filter(function (s) { return !tomb['set:' + setKeyOf(s, seen)]; });
+    });
+    for (var i = (list || []).length - 1; i >= 0; i--) {
+      var x = list[i];
+      if (!x || !Array.isArray(x.sets) || !x.sets.length) list.splice(i, 1);
+    }
+    return list;
+  }
+  // 组数标记：{'pushup|2026-11-25': {n: 2, t: 179...}}，撤销/新增时更新。
+  // 组墓碑要靠 sid 对上，旧版页面推上来的老组没有 sid 就对不上了，
+  // 所以再用「这天几组」这个更粗的标记兜一层，跟版本无关。
+  function trimKeyOf(type, d) { return type + '|' + d; }
+  function setTrim(type, d, n) {
+    if (!db.sport.trim || typeof db.sport.trim !== 'object') db.sport.trim = {};
+    db.sport.trim[trimKeyOf(type, d)] = { n: n, t: Date.now() };
+  }
+  function applyTrim(list, type) {
+    var trim = (db.sport && db.sport.trim) || {};
+    (list || []).forEach(function (e) {
+      if (!e || !e.d || !Array.isArray(e.sets)) return;
+      var m = trim[trimKeyOf(type, e.d)];
+      if (m && typeof m.n === 'number' && e.sets.length > m.n) {
+        e.sets = e.sets.slice(0, m.n);
+      }
+    });
+    for (var i = (list || []).length - 1; i >= 0; i--) {
+      var x = list[i];
+      if (!x || !Array.isArray(x.sets) || !x.sets.length) list.splice(i, 1);
+    }
+    return list;
+  }
+  function mergeTrim(target, extra) {
+    if (!target.trim || typeof target.trim !== 'object') target.trim = {};
+    var src = (extra && extra.trim) || {};
+    Object.keys(src).forEach(function (k) {
+      var a = target.trim[k], b = src[k];
+      if (!b || typeof b.n !== 'number') return;
+      if (!a || typeof a.t !== 'number' || (typeof b.t === 'number' && b.t > a.t)) {
+        target.trim[k] = { n: b.n, t: b.t };
+      }
+    });
+  }
+  // 同一天的两份组列表按组合并（撤销过的已在 dropBuriedSets 里剔掉）
+  function mergeSportSets(target, extra) {
+    var added = 0, byd = {};
+    target.forEach(function (e) { if (e && e.d) byd[e.d] = e; });
+    (extra || []).forEach(function (e) {
+      if (!e || !e.d) return;
+      var cur = byd[e.d];
+      if (!cur) {
+        var copy = { d: e.d, sets: (e.sets || []).slice() };
+        target.push(copy); byd[e.d] = copy; added++;
+        return;
+      }
+      if (!Array.isArray(cur.sets)) cur.sets = [];
+      var seen = {}, have = {};
+      cur.sets.forEach(function (s) { have[setKeyOf(s, seen)] = true; });
+      var seen2 = {};
+      (e.sets || []).forEach(function (s) {
+        var k = setKeyOf(s, seen2);
+        if (!have[k]) { cur.sets.push(s); have[k] = true; added++; }
+      });
+    });
+    return added;
   }
 
   /* ================= 电影 ================= */
@@ -2931,11 +3061,16 @@ footer .mini{font-size:11.5px;padding:6px 12px}
       if (!target.days[k]) { target.days[k] = extra.days[k]; added++; }
     });
 
-    // 2) 运动：按日期合并（日期已存在就用 target 的）
+    // 2) 运动：按「组」合并。只按日期合并的话，刚撤销掉的组会被云端的旧数据整条带回来。
+    //    撤销时埋了组墓碑，这里剔掉；同一天的其余组正常并进来。
     ['pushup', 'squat'].forEach(function (t) {
-      added += unionInto(target.sport[t], extra.sport[t], function (e) { return e && e.d; });
+      added += mergeSportSets(target.sport[t], extra.sport[t]);
+      dropBuriedSets(target.sport[t]);
+      applyTrim(target.sport[t], t);
       target.sport[t].sort(function (a, b) { return (a.d || '') < (b.d || '') ? -1 : 1; });
     });
+    mergeTrim(target.sport, extra.sport);
+    ['pushup', 'squat'].forEach(function (t) { applyTrim(target.sport[t], t); });
     ['pushup', 'squat'].forEach(function (t) {
       if (extra.sport.goal[t] != null) target.sport.goal[t] = target.sport.goal[t] || extra.sport.goal[t];
     });
@@ -3270,6 +3405,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
 
   /* ================= 启动 ================= */
   function renderAll() {
+    backfillSetIds();
     renderToday();
     if (currentView === 'sport') renderSport();
     if (currentView === 'books') renderBooks();
