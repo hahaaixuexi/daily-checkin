@@ -564,7 +564,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
       </div>
       <div class="goal-row"><span>今日 <b id="spGoalNum">0</b> / <span id="spGoalMax">50</span> 个</span><span id="spPct">0%</span></div>
       <div class="bar sport"><span id="spBar"></span></div>
-      <p class="est-line" id="spEst">按组数折算：20 个深蹲 ≈ 1 分半 · 今天还没记组数</p>
+      <p class="est-line" id="spEst">按组数折算：20 个深蹲 ≈ 1 分 10 秒 · 今天还没记组数</p>
       <div class="quick" id="spQuick">
         <button data-add="10">+10</button>
         <button data-add="20">+20</button>
@@ -758,7 +758,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     { id: 'alipay',  icon: '💰', title: '支付宝签到',   sub: '打开支付宝，签到领积分', color: '#2f9de0' },
     { id: 'zhima',    icon: '🌱', title: '芝麻信用',     sub: '支付宝 → 芝麻信用，领一次信用任务', color: '#1c9866', tag: '信用', legacy: 'jiaoshui', legacyNeed: 3 },
     { id: 'sport',   icon: '💪', title: '运动 30 分钟', sub: '俯卧撑 / 深蹲，可以分组做', color: '#f08a3c', type: 'timer', minutes: 30, tag: '计时' },
-    { id: 'squat5',  icon: '🦵', title: '深蹲 20 次',   sub: '一组 20 个，点一下记一组', color: '#5f9e4a', type: 'count', goal: 5, unit: '组', tag: '训练', linkSport: 'squat', perSet: 20, secPerSet: 90 },
+    { id: 'squat5',  icon: '🦵', title: '深蹲 20 次',   sub: '一组 20 个，点一下记一组', color: '#5f9e4a', type: 'count', goal: 5, unit: '组', tag: '训练', linkSport: 'squat', perSet: 20, secPerSet: 70 },
     { id: 'push5',   icon: '🏋️', title: '俯卧撑 5 次',  sub: '一组 5 个，点一下记一组', color: '#c2653f', type: 'count', goal: 5, unit: '组', tag: '训练', linkSport: 'pushup', perSet: 5, secPerSet: 30 },
     { id: 'floss',   icon: '🦷', title: '用牙线清理牙齿', sub: '每颗牙缝都过一遍，睡前做', color: '#5aa9c9', tag: '健康' },
     { id: 'water',   icon: '💧', title: '多喝水',       sub: '一天八杯，一次一杯', color: '#3aa7d8', type: 'water' },
@@ -1233,7 +1233,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     return e && e.sets ? e.sets.length : 0;
   }
   function setsToday(type) { return setsOn(type, TODAY); }
-  // 每组折算多少秒：深蹲一组 20 个 ≈ 一分半（90 秒）；俯卧撑一组 5 个 ≈ 30 秒
+  // 每组折算多少秒：深蹲一组 20 个 ≈ 一分十秒（70 秒）；俯卧撑一组 5 个 ≈ 30 秒
   function secPerSetOf(type) {
     var t = TASKS.filter(function (x) { return x.linkSport === type; })[0];
     return (t && t.secPerSet) || 0;
@@ -1250,13 +1250,13 @@ footer .mini{font-size:11.5px;padding:6px 12px}
   function sportEstMin(k) { return Math.round(sportEstSec(k) / 60); }
 
   // 估算用时的中文说明，今天页和运动页共用。
-  // 折算口径：20 个深蹲一组算 1 分半（90 秒），5 个俯卧撑一组算 30 秒。
+  // 折算口径：20 个深蹲一组算 1 分 10 秒（70 秒），5 个俯卧撑一组算 30 秒。
   function estText(k) {
     var kk = k || TODAY;
     var sq = setsOn('squat', kk), pu = setsOn('pushup', kk);
     var goal = (taskById('sport') && taskById('sport').minutes) || 30;
     var min = sportEstMin(kk);
-    if (!sq && !pu) return '按组数折算：20 个深蹲 ≈ 1 分半 · 今天还没记组数';
+    if (!sq && !pu) return '按组数折算：20 个深蹲 ≈ 1 分 10 秒 · 今天还没记组数';
     var parts = [];
     if (sq) parts.push('深蹲 ' + sq + ' 组');
     if (pu) parts.push('俯卧撑 ' + pu + ' 组');
