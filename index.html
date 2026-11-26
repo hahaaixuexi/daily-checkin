@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <title>每日打卡 · 今天也要好好过</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23f2668b'/%3E%3Cpath d='M18 33.5l9.5 9.5L46 22' fill='none' stroke='%23fff' stroke-width='7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <style>
 :root{
   --paper:#f8f4ec;
@@ -523,7 +524,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
         <circle class="ring-bg" cx="60" cy="60" r="52"/>
         <circle class="ring-fg" id="ringFg" cx="60" cy="60" r="52"/>
       </svg>
-      <div class="ring-center"><span class="num" id="doneCount">0</span><span class="of" id="totalOf">/10</span></div>
+      <div class="ring-center"><span class="num" id="doneCount">0</span><span class="of" id="totalOf">/11</span></div>
     </div>
   </header>
 
@@ -2948,6 +2949,8 @@ footer .mini{font-size:11.5px;padding:6px 12px}
   // 数据存在自己 GitHub 账号下的一个私密 Gist 里。手机、电脑各自打开页面时
   // 直接读写这个 Gist，所以电脑关机也不影响；token 只留在本机浏览器。
   var CLOUD_KEY = 'daily-routine.cloud';
+  // 用户点过「断开云端」就记一笔，下次打开别再自动接上
+  var NO_CLOUD_KEY = 'daily-routine.nocloud';
   var GIST_FILE = 'daily-routine.json';
   var GIST_DESC = '每日打卡数据（自动同步，勿删）';
   var cloudCfg = loadCloudCfg();
@@ -2969,12 +2972,21 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     var headers = { 'Accept': 'application/vnd.github+json' };
     if (cloudCfg.token) headers['Authorization'] = 'Bearer ' + cloudCfg.token;
     if (opts.body) headers['Content-Type'] = 'application/json';
-    return fetch('https://api.github.com' + path, {
-      method: opts.method || 'GET',
-      headers: headers,
-      body: opts.body ? JSON.stringify(opts.body) : undefined,
-      cache: 'no-store'
-    }).then(function (r) {
+    // 代理偶尔会抖一下（Failed to fetch），一次失败就退回本机模式太伤，
+    // 这里自动重试两次，间隔 0.6s / 1.5s。
+    var delays = [500, 1200, 2500, 4000];
+    function attempt(n) {
+      return fetch('https://api.github.com' + path, {
+        method: opts.method || 'GET',
+        headers: headers,
+        body: opts.body ? JSON.stringify(opts.body) : undefined,
+        cache: 'no-store'
+      }).catch(function (err) {
+        if (n >= delays.length) throw err;
+        return new Promise(function (ok) { setTimeout(ok, delays[n]); }).then(function () { return attempt(n + 1); });
+      });
+    }
+    return attempt(0).then(function (r) {
       if (r.status === 401) throw new Error('Token 无效或已失效，请重新生成');
       if (r.status === 404) {
         throw new Error(/^\/gists\//.test(path)
@@ -3116,9 +3128,30 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     });
     resolveTomb(target);
 
-    // 1) 打卡日期：target 没有的补回来
+    // 1) 打卡日期：target 没有的补回来；同一天的两份并起来算
+    //    （只补缺失日期的话，本机新点的那几项会被云端的旧快照盖掉）
     Object.keys(extra.days || {}).forEach(function (k) {
-      if (!target.days[k]) { target.days[k] = extra.days[k]; added++; }
+      var a = target.days[k], b = extra.days[k];
+      if (!a) { target.days[k] = b; added++; return; }
+      if (!b) return;
+      var dA = normalizeDay(a), dB = normalizeDay(b);
+      if (!dA || !dB) { target.days[k] = a || b; return; }
+      var changed = false;
+      Object.keys(dB.done || {}).forEach(function (id) {
+        if (dB.done[id] && !dA.done[id]) { dA.done[id] = true; changed = true; }
+      });
+      if ((dB.water || 0) > (dA.water || 0)) { dA.water = dB.water; changed = true; }
+      Object.keys(dB.counts || {}).forEach(function (id) {
+        var va = Number(dA.counts[id] || 0), vb = Number(dB.counts[id] || 0);
+        if (vb > va) { dA.counts[id] = vb; changed = true; }
+      });
+      Object.keys(dB.timers || {}).forEach(function (id) {
+        if (dA.timers[id] == null && dB.timers[id] != null) { dA.timers[id] = dB.timers[id]; changed = true; }
+      });
+      Object.keys(dB.autoOff || {}).forEach(function (id) {
+        if (dB.autoOff[id] && !dA.autoOff[id]) { dA.autoOff[id] = dB.autoOff[id]; changed = true; }
+      });
+      if (changed) { target.days[k] = dA; added++; }
     });
 
     // 2) 运动：按「组」合并。只按日期合并的话，刚撤销掉的组会被云端的旧数据整条带回来。
@@ -3242,6 +3275,26 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     }, 20000);
   }
 
+  // 本机打开、又没配过云端时，问一下本地服务有没有 cloud.json。
+  // 有就自动接上，省得每台电脑都手动粘一次 Token。
+  function autoCloud() {
+    if (cloudOn()) return Promise.resolve(false);
+    if (!isLocalPage()) return Promise.resolve(false);
+    try { if (localStorage.getItem(NO_CLOUD_KEY) === '1') return Promise.resolve(false); } catch (e) {}
+    return resolveBase().then(function (b) {
+      return fetch((b || '') + '/api/cloudcfg', { cache: 'no-store' });
+    }).then(function (r) {
+      if (!r.ok) throw new Error('http ' + r.status);
+      return r.json();
+    }).then(function (j) {
+      if (!j || !j.ok || !j.token || !j.gist) return false;
+      saveCloudCfg({ token: j.token, gist: j.gist });
+      toast('已自动接上云端 ☁️');
+      return true;
+    }).catch(function () { return false; });
+  }
+
+  var bootCloudRetried = false, cloudDead = false;
   function bootCloud() {
     setStatus('正在连接云端…', true);
     cloudStatus('正在连接云端…', 'wait');
@@ -3266,8 +3319,20 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     }).catch(function (e) {
       db = loadLocal();
       cloudStatus('连接失败：' + e.message, 'bad');
+      setStatus('正在重连云端…', true);
+      // 代理/网络偶尔抖一下，别让用户一打开就看到「失败」。3 秒后自己再试一次，
+      // 还不行才明说失败（之后每 20 秒的轮询还会继续兜）。
+      if (!bootCloudRetried) {
+        bootCloudRetried = true;
+        setTimeout(function () { bootCloud(); }, 3000);
+        return;
+      }
       setStatus('云端连接失败 · 数据暂存在本机', false);
+      // 云端彻底连不上时不要给一个空页面：本机有服务就退回读 data.json，
+      // localStorage 里的记录会在 migrateLocal 时一并补进去。
+      if (isLocalPage()) { cloudDead = true; return; }
     }).then(function () {
+      if (cloudDead) { online = false; bootLocal(); return; }
       online = true;
       start();
       startCloudLoop();
@@ -3426,6 +3491,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
         toast('这不像 GitHub Token，检查是不是没复制全'); return;
       }
       saveCloudCfg({ token: tk, gist: cloudCfg.gist || '' });
+      try { localStorage.removeItem(NO_CLOUD_KEY); } catch (err) {}
       cloudStatus('正在验证 Token…', 'wait');
       var loginName = '';
       ghFetch('/user').then(function (u) {
@@ -3457,6 +3523,8 @@ footer .mini{font-size:11.5px;padding:6px 12px}
 
     if (e.target.closest('#cloudOffBtn')) {
       saveCloudCfg({ token: '', gist: '' });
+      // 记一笔「用户主动断开」，否则下次打开又被 cloud.json 自动接上
+      try { localStorage.setItem(NO_CLOUD_KEY, '1'); } catch (err) {}
       if (cloudPollTimer) { clearInterval(cloudPollTimer); cloudPollTimer = null; }
       closeModal();
       setStatus('已断开云端 · 回到本机模式', false);
@@ -3505,6 +3573,16 @@ footer .mini{font-size:11.5px;padding:6px 12px}
   function boot() {
     if (cloudOn()) { bootCloud(); return; }
     setStatus('正在连接本地数据…', true);
+    autoCloud().then(function (yes) {
+      if (yes && cloudOn()) { bootCloud(); return true; }
+      return false;
+    }).then(function (done) {
+      if (done) return;
+      bootLocal();
+    });
+  }
+
+  function bootLocal() {
     resolveBase()
       .then(function () { return api('/api/all'); })
       .then(function (res) {
