@@ -3128,30 +3128,11 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     });
     resolveTomb(target);
 
-    // 1) 打卡日期：target 没有的补回来；同一天的两份并起来算
-    //    （只补缺失日期的话，本机新点的那几项会被云端的旧快照盖掉）
+    // 1) 打卡日期：target 没有的补回来
+    //    同一天两边都有时不合并 —— 合并（done 取或）会让「今天取消勾选」
+    //    被云端的旧记录顶回来，取消永远同步不出去。
     Object.keys(extra.days || {}).forEach(function (k) {
-      var a = target.days[k], b = extra.days[k];
-      if (!a) { target.days[k] = b; added++; return; }
-      if (!b) return;
-      var dA = normalizeDay(a), dB = normalizeDay(b);
-      if (!dA || !dB) { target.days[k] = a || b; return; }
-      var changed = false;
-      Object.keys(dB.done || {}).forEach(function (id) {
-        if (dB.done[id] && !dA.done[id]) { dA.done[id] = true; changed = true; }
-      });
-      if ((dB.water || 0) > (dA.water || 0)) { dA.water = dB.water; changed = true; }
-      Object.keys(dB.counts || {}).forEach(function (id) {
-        var va = Number(dA.counts[id] || 0), vb = Number(dB.counts[id] || 0);
-        if (vb > va) { dA.counts[id] = vb; changed = true; }
-      });
-      Object.keys(dB.timers || {}).forEach(function (id) {
-        if (dA.timers[id] == null && dB.timers[id] != null) { dA.timers[id] = dB.timers[id]; changed = true; }
-      });
-      Object.keys(dB.autoOff || {}).forEach(function (id) {
-        if (dB.autoOff[id] && !dA.autoOff[id]) { dA.autoOff[id] = dB.autoOff[id]; changed = true; }
-      });
-      if (changed) { target.days[k] = dA; added++; }
+      if (!target.days[k]) { target.days[k] = extra.days[k]; added++; }
     });
 
     // 2) 运动：按「组」合并。只按日期合并的话，刚撤销掉的组会被云端的旧数据整条带回来。
