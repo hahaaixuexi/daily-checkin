@@ -614,6 +614,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
       <button class="seg-btn" data-life="nails">💅 指甲</button>
       <button class="seg-btn" data-life="ear">👂 采耳</button>
       <button class="seg-btn" data-life="brow">🪒 修眉</button>
+      <button class="seg-btn" data-life="teeth">🦷 洗牙</button>
     </div>
     <div class="panel" id="lifeShower">
       <div class="panel-head"><b>洗澡记录</b><span class="hint" id="showerHint">—</span></div>
@@ -653,6 +654,12 @@ footer .mini{font-size:11.5px;padding:6px 12px}
       <div id="browList"></div>
       <div class="sec-title" style="margin-top:16px"><span>最近记录</span></div>
       <div id="browHistory" class="row-list"></div>
+    </div>
+    <div class="panel" id="lifeTeeth" hidden>
+      <div class="panel-head"><b>🦷 洗牙</b><span class="hint" id="teethHint">点一下记下今天，再点取消</span></div>
+      <div id="teethList"></div>
+      <div class="sec-title" style="margin-top:16px"><span>最近记录</span></div>
+      <div id="teethHistory" class="row-list"></div>
     </div>
   </section>
 
@@ -813,6 +820,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     if (!Array.isArray(o.life.nails.foot)) o.life.nails.foot = [];
     if (!Array.isArray(o.life.ear)) o.life.ear = [];
     if (!Array.isArray(o.life.brow)) o.life.brow = [];
+    if (!Array.isArray(o.life.teeth)) o.life.teeth = [];
     if (!o.revive || typeof o.revive !== 'object') o.revive = {};
     // 云端拉回来的老数据也先补好 sid，合并时前后端键才能对上
     backfillSport(o);
@@ -2135,6 +2143,53 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     }).join('');
   }
 
+  /* ---------- 洗牙 ---------- */
+  // 洗牙一般半年一次，按 180 天提醒
+  var TEETH_INTERVAL = 180;
+
+  function teethArr() {
+    if (!Array.isArray(db.life.teeth)) db.life.teeth = [];
+    return db.life.teeth;
+  }
+
+  function addTeeth() {
+    var arr = teethArr();
+    var i = arr.indexOf(TODAY);
+    if (i >= 0) { arr.splice(i, 1); bury('teeth', TODAY); toast('已取消今天的洗牙'); }
+    else { arr.push(TODAY); unbury('teeth', TODAY); toast('🦷 已记下今天洗牙'); }
+    scheduleSave('life');
+    renderTeeth();
+  }
+
+  function renderTeeth() {
+    var arr = dropBuried(teethArr().slice(), 'teeth');
+    var s = bedStatus(lifeLast(arr), TEETH_INTERVAL);
+    var on = arr.indexOf(TODAY) >= 0;
+    $('#teethList').innerHTML = '<div class="life-row">' +
+      '<div class="lr-t"><b>🦷 洗牙</b><span>建议半年左右洗一次' +
+        (s.due ? ' · 建议 ' + s.due : '') + ' · 累计 ' + arr.length + ' 次</span></div>' +
+      '<span class="bb ' + s.cls + '">' + s.text + '</span>' +
+      '<button class="mini' + (on ? ' primary' : '') + '" data-teeth="1">' +
+        (on ? '已洗' : '今天洗') + '</button>' +
+    '</div>';
+
+    var all = arr.slice().sort(function (a, b) { return a < b ? 1 : -1; });
+    if (!all.length) {
+      $('#teethHistory').innerHTML = '<div class="empty">还没有记录<br>点上面的按钮记下第一次</div>';
+      return;
+    }
+    $('#teethHistory').innerHTML = all.slice(0, 10).map(function (d) {
+      var dt = parseKey(d);
+      var n = daysBetween(d, TODAY);
+      return '<div class="task-row">' +
+        '<span class="ti">🦷</span>' +
+        '<span class="tn">洗牙</span>' +
+        '<span class="tv">' + dt.getFullYear() + '-' + pad(dt.getMonth() + 1) + '-' + pad(dt.getDate()) +
+          ' · ' + (n === 0 ? '今天' : n + ' 天前') + '</span>' +
+      '</div>';
+    }).join('');
+  }
+
   function renderHaircut() {
     var list = (db.life.haircut || []).slice().sort(function (a, b) { return a.d < b.d ? 1 : -1; });
     var last = list[0];
@@ -2176,7 +2231,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     document.querySelectorAll('#lifeSeg .seg-btn').forEach(function (b) {
       b.classList.toggle('active', b.dataset.life === lifeView);
     });
-    ['shower', 'hair', 'haircut', 'bedding', 'nails', 'ear', 'brow'].forEach(function (k) {
+    ['shower', 'hair', 'haircut', 'bedding', 'nails', 'ear', 'brow', 'teeth'].forEach(function (k) {
       var el = $('#life' + k.charAt(0).toUpperCase() + k.slice(1));
       if (el) el.hidden = (k !== lifeView);
     });
@@ -2186,6 +2241,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     if (lifeView === 'nails') renderNails();
     if (lifeView === 'ear') renderEar();
     if (lifeView === 'brow') renderBrow();
+    if (lifeView === 'teeth') renderTeeth();
   }
 
   /* ================= 记录 ================= */
@@ -2445,6 +2501,8 @@ footer .mini{font-size:11.5px;padding:6px 12px}
         addHaircut();
       } else if (lifeView === 'brow') {
         addBrow();
+      } else if (lifeView === 'teeth') {
+        addTeeth();
       } else if (lifeView === 'ear') {
         addEar();
       } else if (lifeView === 'nails') {
@@ -2660,6 +2718,8 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     if (ea) addEar();
     var br = e.target.closest('[data-brow]');
     if (br) addBrow();
+    var te = e.target.closest('[data-teeth]');
+    if (te) addTeeth();
   });
 
   /* ---- 记录 ---- */
@@ -3101,6 +3161,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     });
     added += unionInto(target.life.ear, extra.life.ear, function (x) { return String(x); });
     added += unionInto(target.life.brow, extra.life.brow, function (x) { return String(x); });
+    added += unionInto(target.life.teeth, extra.life.teeth, function (x) { return String(x); });
 
     // 取消过的记录留了墓碑：合并回来之后再按墓碑剔一遍，
     // 否则云端「只增不减」会把刚取消的又补回去。
@@ -3109,6 +3170,7 @@ footer .mini{font-size:11.5px;padding:6px 12px}
     ['hand', 'foot'].forEach(function (k) { dropBuried(target.life.nails[k], 'nail' + k); });
     dropBuried(target.life.ear, 'ear');
     dropBuried(target.life.brow, 'brow');
+    dropBuried(target.life.teeth, 'teeth');
 
     // 5.5) 电影：按 id 合并，保留本机已有的评分
     added += unionInto(target.movies, extra.movies, function (m) { return m && (m.id || m.title); });
